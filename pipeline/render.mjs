@@ -1244,7 +1244,7 @@ const barcodeStyle = (seed) => {
   return `background-image:linear-gradient(90deg,${stops.join(',')});background-size:${x}px 100%`
 }
 
-export function renderItinerary(itinerary, { outDir }) {
+export function renderItinerary(itinerary, { outDir, customTokens }) {
   const tripId = itinerary.trip_id || 'trip_unknown'
   const shortId = tripId.split('_').at(-1).slice(0, 4)
   const dtz = itinerary.destination_timezone || 'UTC'
@@ -1254,7 +1254,10 @@ export function renderItinerary(itinerary, { outDir }) {
   // theme 只讀欄位、不推斷（舊 JSON 一律 default——回歸鐵律）。
   const themeName = THEMES[itinerary.theme] ? itinerary.theme : 'default'
   const themeMotifs = THEMES[themeName].motifs || {}
-  const themeOverrideCss = themeCss(themeName)
+  const customCss = customTokens && Object.keys(customTokens).length
+    ? `\n:root{${Object.entries(customTokens).map(([k, v]) => `--${k}:${v}`).join(';')};}`
+    : ''
+  const themeOverrideCss = themeCss(themeName) + customCss
   // 記念票畫版：data/posters/<trip_id>.png 存在才渲染（檔案是觸發器，欄位只是紀錄）。
   const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
   const posterSrc = path.join(packageRoot, 'data', 'posters', `${tripId}.png`)
