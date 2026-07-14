@@ -19,8 +19,9 @@
 // Outputs: .trip_work/final_itinerary.json, data/final_itinerary.json, dist/
 import fs from 'node:fs'
 import path from 'node:path'
+import readline from 'node:readline/promises'
 import { fileURLToPath } from 'node:url'
-import { planTrip, renderTicket, tripDirName, tripsDataDir, saveTripJson } from './trip.mjs'
+import { planTrip, renderTicket, parseDesignChoice, tripDirName, tripsDataDir, saveTripJson } from './trip.mjs'
 import { renderItinerary } from './render.mjs'
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -107,8 +108,27 @@ const log = (msg) => console.error(`[orchestrator] ${msg}`)
 async function main() {
   const { plan, designOptions } = await planTrip(sentence, { mock, backend: backendFlag, log })
 
-  // Design menu lands in Task 6 — until then, take the top recommendation.
-  const choice = { kind: 'preset', name: designOptions.presets[0].name }
+  const designFlag = args.find((a) => a.startsWith('--design='))?.split('=').slice(1).join('=')
+  let choice
+  if (designFlag) {
+    choice = parseDesignChoice(designFlag, designOptions)
+  } else if (process.stdin.isTTY && !mock) {
+    console.error('\n這趟旅程,你想要哪種票面設計?')
+    designOptions.presets.forEach((p, i) => console.error(`  ${i + 1}. ${p.label} —— ${p.why}`))
+    console.error(`  ${designOptions.presets.length + 1}. ${designOptions.custom.label} —— ${designOptions.custom.hint}`)
+    const rl = readline.createInterface({ input: process.stdin, output: process.stderr })
+    const ans = (await rl.question(`選 1-${designOptions.presets.length + 1} (預設 1): `)).trim()
+    const n = Number(ans)
+    if (n === designOptions.presets.length + 1) {
+      const style = (await rl.question('一句話描述你要的風格: ')).trim()
+      choice = style ? { kind: 'custom', style } : { kind: 'preset', name: designOptions.presets[0].name }
+    } else {
+      choice = { kind: 'preset', name: designOptions.presets[Math.min(Math.max(n || 1, 1), designOptions.presets.length) - 1].name }
+    }
+    rl.close()
+  } else {
+    choice = { kind: 'preset', name: designOptions.presets[0].name }
+  }
 
   const { manifest, tripDir } = await renderTicket(plan, choice, { skipRender, log })
 

@@ -387,6 +387,20 @@ export async function planTrip(sentence, { mock = false, backend, log = console.
 }
 
 // ---------------------------------------------------------------------------
+// parseDesignChoice — CLI --design= flag parsing, shared by the orchestrator
+// so its own tests can exercise this without spawning a subprocess.
+
+export function parseDesignChoice(flagValue, designOptions) {
+  const fallback = { kind: 'preset', name: designOptions.presets[0].name }
+  if (!flagValue) return fallback
+  if (flagValue.startsWith('custom:')) {
+    const style = flagValue.slice('custom:'.length).trim()
+    return style ? { kind: 'custom', style } : fallback
+  }
+  return designOptions.presets.some((p) => p.name === flagValue) ? { kind: 'preset', name: flagValue } : fallback
+}
+
+// ---------------------------------------------------------------------------
 // renderTicket — theme choice → poster → assemble → persist → render.
 
 export async function renderTicket(plan, choice, { skipRender = false, log = console.error } = {}) {
