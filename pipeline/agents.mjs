@@ -357,10 +357,9 @@ export function runTimezoneAgent(brief) {
   }
 }
 
-// Gmail / Calendar context agents. Gmail is wired to a real connector
-// (Composio MCP); Calendar remains a stub until its connector lands. Both
-// report their own status honestly so the final artifact never pretends
-// bookings/events were checked when they weren't.
+// Gmail / Calendar context agents. Both are wired to real connectors
+// (Composio MCP). Both report their own status honestly so the final
+// artifact never pretends bookings/events were checked when they weren't.
 const BOOKINGS_SCHEMA = {
   type: 'object',
   properties: {
