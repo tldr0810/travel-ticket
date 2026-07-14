@@ -14,6 +14,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import { mergedTokens } from './themes.mjs'
+import { mcpSession, composioEnabled } from './composio.mjs'
 
 const execFileAsync = promisify(execFile)
 
@@ -74,6 +75,20 @@ async function runCliJson({ system, prompt, schema, webSearch = false }) {
   const envelope = JSON.parse(stdout)
   if (envelope.is_error) throw new Error(`claude CLI error: ${String(envelope.result).slice(0, 300)}`)
   return extractJson(envelope.result)
+}
+
+// Backend-agnostic structured-output call (sdk or cli), shared by connector agents.
+async function runJson(ctx, { system, prompt, schema, maxTokens = 4000 }) {
+  if (!ctx) throw new Error('no LLM context')
+  if (ctx.backend === 'cli') return runCliJson({ system, prompt, schema })
+  const response = await ctx.client.messages.create({
+    model: MODEL,
+    max_tokens: maxTokens,
+    output_config: { format: { type: 'json_schema', schema } },
+    system,
+    messages: [{ role: 'user', content: prompt }],
+  })
+  return parseStructured(response)
 }
 
 // ---------------------------------------------------------------------------
@@ -342,15 +357,68 @@ export function runTimezoneAgent(brief) {
   }
 }
 
-// Gmail / Calendar context agents — stubs until a connector (MCP server,
-// Composio, etc.) is wired in. They report their own status honestly so the
-// final artifact never pretends bookings were checked.
-export async function runTravelContextAgent() {
-  return {
-    status: 'skipped',
-    confidence: 0,
-    notes: 'No Gmail connector configured; booking confirmations were not checked.',
-    bookings: [],
+// Gmail / Calendar context agents. Gmail is wired to a real connector
+// (Composio MCP); Calendar remains a stub until its connector lands. Both
+// report their own status honestly so the final artifact never pretends
+// bookings/events were checked when they weren't.
+const BOOKINGS_SCHEMA = {
+  type: 'object',
+  properties: {
+    bookings: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          type: { type: 'string', enum: ['flight', 'hotel', 'train', 'car', 'activity'] },
+          vendor: { type: 'string' },
+          confirmation_no: { type: 'string' },
+          start: { type: 'string' },
+          end: { type: 'string' },
+          location: { type: 'string' },
+          pax: { type: 'integer' },
+        },
+        required: ['type', 'vendor'],
+      },
+    },
+  },
+  required: ['bookings'],
+}
+
+const EXTRACT_SYSTEM = 'You extract travel bookings from emails. Only extract fields literally present in the text; leave missing fields as empty string / omit. NEVER invent vendors, confirmation numbers or dates. If no real bookings, return {"bookings":[]}.'
+
+export async function runTravelContextAgent(ctx, brief, deps = {}) {
+  if (!composioEnabled()) {
+    return { status: 'skipped', confidence: 0, notes: 'COMPOSIO_API_KEY not set; booking emails were not checked.', bookings: [] }
+  }
+  try {
+    const session = await (deps.session ? deps.session() : mcpSession())
+    const destWord = String(brief?.destination || '').split(/[:,&，、]/)[0].trim()
+    const query = `(booking OR reservation OR confirmation OR itinerary OR e-ticket OR 訂位 OR 訂房 OR 確認) ${destWord} newer_than:180d`
+    const list = await session.execToolkitTool('GMAIL_FETCH_EMAILS', {
+      query, max_results: 20, verbose: false, include_payload: false,
+    })
+    const messages = (list?.messages ?? []).filter((m) => m?.messageId)
+    if (!messages.length) return { status: 'ok', confidence: 0.6, notes: 'No booking-looking emails found in the last 180 days.', bookings: [] }
+
+    const shortlist = messages.slice(0, 10)
+    const bodies = []
+    for (const m of shortlist) {
+      try {
+        const full = await session.execToolkitTool('GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID', { message_id: m.messageId, format: 'full' })
+        const text = full?.messageText ?? full?.snippet ?? JSON.stringify(full).slice(0, 2000)
+        bodies.push(`--- EMAIL (subject: ${full?.subject ?? m.subject ?? ''}) ---\n${String(text).slice(0, 4000)}`)
+      } catch { /* one bad mail never kills the agent */ }
+    }
+    if (!bodies.length) return { status: 'ok', confidence: 0.5, notes: 'Emails found but none could be fetched in full.', bookings: [] }
+
+    const llm = deps.llm ?? ((req) => runJson(ctx, req))
+    const req = { system: EXTRACT_SYSTEM, prompt: `Trip: ${brief.destination}, ${brief.start_date}→${brief.end_date}.\n\n${bodies.join('\n\n')}`, schema: BOOKINGS_SCHEMA }
+    let extracted
+    try { extracted = await llm(req) } catch { try { extracted = await llm(req) } catch { extracted = null } }
+    const bookings = Array.isArray(extracted?.bookings) ? extracted.bookings : []
+    return { status: 'ok', confidence: bookings.length ? 0.75 : 0.6, notes: `Checked ${bodies.length} emails; extracted ${bookings.length} booking(s).`, bookings }
+  } catch (error) {
+    return { status: 'skipped', confidence: 0, notes: `Gmail check skipped: ${error.message}`, bookings: [] }
   }
 }
 

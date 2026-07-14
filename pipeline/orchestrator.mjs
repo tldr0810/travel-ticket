@@ -411,7 +411,7 @@ async function main() {
     mock
       ? (recordStatus('Local Discovery Agent', 'completed', 1, 'Mock discovery.'), log('Local Discovery Agent: completed (mock)'), Promise.resolve({ ok: true, result: MOCK_DISCOVERY }))
       : supervise('Local Discovery Agent', () => runLocalDiscoveryAgent(ctx, brief), { confidence: 0.8 }),
-    supervise('Travel Context Agent', () => runTravelContextAgent(brief)),
+    supervise('Travel Context Agent', () => runTravelContextAgent(ctx, brief)),
     supervise('Calendar Agent', () => runCalendarAgent(brief)),
   ])
 
