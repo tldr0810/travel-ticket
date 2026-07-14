@@ -1,0 +1,7 @@
+name = "trip-tickets-2026"
+main = "src/itinerary-worker.ts"
+compatibility_date = "2024-09-23"
+
+[assets]
+directory = "dist"
+binding = "ASSETS"

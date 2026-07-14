@@ -1,0 +1,106 @@
+# Trip Ticket Pipeline — 一句話變旅遊手冊
+
+線上版（瑞士 demo）：https://switzerland-itinerary-2026.zack-chen.workers.dev
+
+## 這是什麼
+一個 multi-agent pipeline：輸入一句話的旅遊需求，經過多個 agent 協作，
+產出票券風格的互動行程網站（可部署到 Cloudflare Workers）。
+
+```
+一句話 ─▶ Trip Brief Agent (LLM, structured output)
+              ├─ Timezone Agent        (純程式，Intl 計算時差/DST)
+              ├─ Local Discovery Agent (LLM + web search，官方來源)
+              ├─ Travel Context Agent  (stub：待接 Gmail connector)
+              └─ Calendar Agent        (stub：待接 Calendar connector)
+          Itinerary Composer Agent (LLM) ─▶ final_itinerary.json ─▶ dist/ 網站
+```
+
+每個 agent 都在 orchestrator 的監督下執行（timeout、狀態、confidence 都會
+記錄進最終產物的 `agent_statuses`）。Composer 失敗或逾時時，orchestrator
+會用本地 fallback composer 硬湊出可渲染的行程（跟瑞士 demo 當初的行為一樣）。
+
+## 怎麼跑
+
+### 入口網頁（推薦）
+
+```bash
+npm run studio   # → http://localhost:4747
+```
+
+開瀏覽器貼上一句話 → 按「出票」→ 即時看每個 agent 的進度 →
+完成後自動出現「打開手冊」，封面在 `/trip/`、每日分頁在 `/trip/day-*.html`。
+入口右下角隨時列出最新一份手冊的 Cover / Day 快速連結。
+
+### 指令列
+
+```bash
+npm install
+
+# 真實跑 — 不需要 API key：沒有 ANTHROPIC_API_KEY 時會自動改用
+# headless `claude -p`（走你 Claude Code 的登入 / 訂閱額度）
+npm run plan -- "十月中帶另一半從台北去京都四天，賞楓吃和食，步調放鬆"
+
+# 測試 pipeline 管線（完全不打 LLM，用固定假資料）
+npm run plan:mock
+
+# 重新產生瑞士 demo（純資料，不打 LLM）
+npm run demo
+
+# 只重新渲染最新一份行程（改了 render.mjs 設計之後用）
+node pipeline/orchestrator.mjs --render-only
+
+# 只重印票夾裡指定那份（slug 前綴即可）
+node pipeline/orchestrator.mjs --render-only --trip=kyoto
+```
+
+### 票夾（多份手冊共存）
+
+- 每次產出：最新一份印在 `dist/` 根（部署相容），同時收進
+  `dist/trips/<slug-id>/`＋`data/trips/<slug-id>.json`。
+- Studio 首頁右下 **Ticket Wallet** 列出歷史手冊（`/trips/<slug-id>/`）。
+- 日票有 Relaxed/Full 深連結（`?mode=full`）、撕票翻頁（View Transitions＋
+  手機左右滑）、行程蓋章（郵戳＋時刻，localStorage 僅本機）。
+
+LLM backend 自動選擇（也可用 `--backend=sdk|cli` 強制指定）：
+1. `sdk` — 有 `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` 時走 Anthropic API
+   （`claude-opus-4-8` + 真正的 structured outputs）。
+2. `cli` — 否則 fallback 到 headless `claude -p`（Claude Code 登入，訂閱額度計費；
+   模型跟隨 Claude Code 預設，可用環境變數 `PIPELINE_CLAUDE_MODEL` 覆寫）。
+
+實測（cli backend）：一句話 → 完整京都四天行程約 6 分鐘
+（Brief ~18s、Discovery 含 web search ~150s、Composer ~170s）。
+
+產出：
+- `.trip_work/final_itinerary.json`、`data/final_itinerary.json` — 結構化行程
+- `dist/index.html` + `dist/day-*.html` — 互動網站，瀏覽器直接開即可預覽
+
+## 檔案結構
+
+| 路徑 | 說明 |
+|---|---|
+| `DESIGN.md` | 設計語言（tokens、字體角色、元件語彙、無障礙底線）——改前端先讀這份 |
+| `pipeline/server.mjs` + `pipeline/studio.html` | 入口網頁（Studio）：貼一句話出票、看 agent 進度、瀏覽產出手冊 |
+| `pipeline/orchestrator.mjs` | 派工、timeout 監督、fallback、組裝 JSON、觸發渲染 |
+| `pipeline/agents.mjs` | 各 agent 實作（Claude API `claude-opus-4-8`、structured outputs、web search）＋時區工具 |
+| `pipeline/render.mjs` | 通用渲染器：任意 `final_itinerary` JSON → 票券風格網站（單一真實來源） |
+| `scripts/generate-itinerary-preview.mjs` | 瑞士 demo 的行程資料，渲染走 `pipeline/render.mjs` |
+| `scripts/serve-dist.mjs` | 本地預覽 dist 的小型靜態 server |
+| `src/itinerary-worker.ts` + `wrangler.itinerary.toml` | Cloudflare Workers 部署（assets = dist/） |
+
+## final_itinerary JSON 重點欄位
+- `days[].items[]`：`start_utc`/`end_utc`（UTC-first）＋ `timezone`、`variant`（both/relaxed/full）、`sources`
+- `agent_statuses`：每個 agent 的 status/confidence/notes（誠實記錄 skipped/failed/timeout）
+- `cover`：封面文案（標題、eyebrow、route stops、stats）——Composer 產生，渲染器也能自行推導
+- `actions_suggested`：後續動作（訂票確認、寫入 Calendar 等），全部 `requires_approval: true`
+
+## 部署
+```bash
+npx wrangler deploy --config wrangler.itinerary.toml
+```
+
+## 還沒接的東西
+- **Gmail / Calendar connector**：`pipeline/agents.mjs` 裡的 `runTravelContextAgent`
+  / `runCalendarAgent` 目前是誠實回報 skipped 的 stub。接上 MCP/Composio 後，
+  把查到的 bookings/events 回傳即可，Composer 已會把它們納入輸入。
+- **自動部署**：orchestrator 產出後停在 `deployment_status: awaiting_approval`，
+  部署仍是手動指令。

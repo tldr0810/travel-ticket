@@ -1,0 +1,463 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trip Ticket Studio</title>
+<meta name="description" content="一句話出一疊車票：貼上旅程描述，multi-agent pipeline 排出逐日行程，印成車票風格的旅遊手冊。">
+<meta name="theme-color" content="#efe0c3">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<style>
+/* Hallmark · design-system: DESIGN.md · concept: train-ticket stack · register: brand · genre: bespoke (ticket) */
+@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800;900&family=Noto+Sans+TC:wght@400;500;700;900&family=IBM+Plex+Mono:wght@500;600;700&display=swap');
+:root {
+  color-scheme: light;
+  --ink: #171713;
+  --muted: #69645a;
+  --paper: #fff8ea;
+  --line: #d6c7aa;
+  --rail: #e3372d;
+  --rail-deep: #9c322b;
+  --gold: #f3c95f;
+  --blue: #176b87;
+  --green: #1f5d4a;
+  --night: #292a25;
+  --rail-press: #c82018;
+  --paper-bright: #fffdf7;
+  --paper-dim: #eee5d5;
+  --paper-ghost: #bdb19d;
+  --line-strong: #b9aa90;
+  --line-btn: #c8b99e;
+  --desk: #efe0c3;
+  --desk-shade: #ddd8c8;
+  --stack-1: #f3e7cf;
+  --stack-2: #eadcc2;
+  --stack-edge: #d1c0a0;
+  --signal-ok: #7fbf6a;
+  --font-display: "Archivo", sans-serif;
+  --font-body: "Noto Sans TC", "Archivo", sans-serif;
+  --font-mono: "IBM Plex Mono", "Noto Sans TC", ui-monospace, monospace;
+  --shadow: 0 24px 70px rgba(34,28,19,.18);
+}
+* { box-sizing: border-box; }
+html, body { overflow-x: clip; }
+a, button { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+body {
+  margin: 0;
+  color: var(--ink);
+  font-family: "Noto Sans TC", "Archivo", sans-serif;
+  background: linear-gradient(135deg,var(--desk),var(--paper) 45%,var(--desk-shade));
+}
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: .35;
+  background-image: repeating-linear-gradient(135deg,rgba(23,23,19,.05) 0 1px,transparent 1px 18px);
+}
+.page { position: relative; z-index: 1; min-height: 100vh; min-height: 100svh; display: grid; place-items: center; padding: 28px; }
+.ticket-stack { width: min(1080px, 100%); position: relative; }
+.ticket-stack::before,
+.ticket-stack::after {
+  content: ""; position: absolute; inset: 16px -10px -16px 10px;
+  background: var(--stack-1); border: 1px solid var(--stack-edge); transform: rotate(-1.1deg); z-index: -2;
+}
+.ticket-stack::after { inset: 30px -20px -30px 22px; transform: rotate(1.2deg); background: var(--stack-2); z-index: -3; }
+.ticket {
+  position: relative; overflow: hidden; background: var(--paper);
+  border: 1px solid var(--line); box-shadow: var(--shadow);
+  clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px));
+}
+.ticket::before {
+  content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 18px;
+  background: repeating-radial-gradient(circle at 9px 12px, transparent 0 5px, var(--rail) 5px 7px, transparent 7px 25px);
+}
+.ticket-grid { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(320px, .7fr); min-height: 620px; }
+.main { position: relative; background: var(--night); color: var(--paper-bright); padding: 38px 36px 30px 50px; }
+.main::before { content: ""; position: absolute; inset: 0; background: repeating-linear-gradient(135deg, rgba(255,255,255,.055) 0 1px, transparent 1px 18px); }
+.main > * { position: relative; }
+.stub {
+  position: relative; padding: 32px 30px 26px 34px; border-left: 1px dashed var(--line-strong);
+  display: flex; flex-direction: column; gap: 16px;
+}
+.stub::before, .stub::after {
+  content: ""; position: absolute; left: -14px; width: 28px; height: 28px; border-radius: 50%;
+  background: var(--desk); border: 1px solid var(--line);
+}
+.stub::before { top: -14px; }
+.stub::after { bottom: -14px; }
+.eyebrow, .label, .cta, .stamp {
+  font-family: "Archivo", sans-serif; font-weight: 900; text-transform: uppercase; letter-spacing: .11em;
+}
+.eyebrow { font-size: 12px; color: var(--gold); }
+a:focus-visible, button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+.stub a:focus-visible { outline-color: var(--rail); }
+h1 { font-family: "Archivo","Noto Sans TC",sans-serif; font-size: clamp(44px, 7vw, 88px); line-height: .96; margin: 14px 0 12px; text-wrap: balance; }
+h1 span { color: var(--gold); }
+.hint { font-size: 15px; line-height: 1.85; color: var(--paper-dim); max-width: 42ch; text-wrap: pretty; }
+textarea {
+  width: 100%; min-height: 120px; margin-top: 22px; padding: 16px;
+  font: 500 17px/1.7 var(--font-body); color: var(--ink);
+  background: var(--paper); border: 1px solid var(--line-btn); resize: vertical;
+  clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px));
+}
+textarea::placeholder { color: var(--muted); opacity: 1; }
+textarea:focus { outline: 3px solid var(--gold); }
+/* Preset 示範票根：沿用 .wallet-stub 的紙卡＋撕角語彙，點了把示範句填進 textarea（不送出）。 */
+.presets { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
+.presets .label { flex-basis: 100%; color: var(--gold); font-size: 10px; }
+.preset-stub {
+  cursor: pointer; text-align: left; padding: 8px 12px 8px 14px;
+  background: var(--paper-bright); border: 1px solid var(--line);
+  clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px));
+}
+.preset-stub b { display: block; font: 700 13px var(--font-body); color: var(--ink); }
+.preset-stub small { display: block; font: 600 10px var(--font-mono); letter-spacing: .08em; color: var(--muted); text-transform: uppercase; margin-top: 2px; }
+.preset-stub:hover { border-color: var(--rail); }
+.preset-stub:hover b { color: var(--rail-press); }
+/* clip-path 會裁掉外描邊：紙卡上焦點框走「紙上紅框」規則、往內畫。 */
+.preset-stub:focus-visible { outline: 3px solid var(--rail); outline-offset: -3px; }
+.controls { display: flex; gap: 14px; align-items: center; margin-top: 16px; flex-wrap: wrap; }
+.cta {
+  display: inline-flex; align-items: center; justify-content: center; min-width: 200px;
+  background: var(--rail-press); color: var(--paper-bright); padding: 15px 26px; border: 0; font-size: 14px; cursor: pointer;
+}
+.cta:hover, .cta:active { background: var(--rail-deep); }
+.cta:disabled { background: var(--muted); cursor: wait; }
+.mockbox { font-size: 12px; color: var(--paper-ghost); display: flex; gap: 6px; align-items: center; }
+.board { margin-top: 26px; border-top: 1px dashed rgba(255,248,234,.3); padding-top: 16px; display: none; }
+.board.show { display: block; }
+.agent-row {
+  display: grid; grid-template-columns: 14px 1fr auto; gap: 10px; align-items: center;
+  padding: 7px 0; border-bottom: 1px solid rgba(255,255,255,.08);
+  font: 700 13px "Archivo", sans-serif; letter-spacing: .06em; text-transform: uppercase;
+}
+.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); }
+@media (prefers-reduced-motion: no-preference) {
+  .agent-row[data-s="running"] .dot { animation: blink 1s infinite; }
+}
+.agent-row[data-s="running"] .dot { background: var(--gold); }
+.agent-row[data-s="completed"] .dot { background: var(--signal-ok); }
+.agent-row[data-s="skipped"] .dot { background: var(--blue); }
+.agent-row[data-s="failed"] .dot, .agent-row[data-s="timeout"] .dot { background: var(--rail); }
+.agent-status { color: var(--paper-ghost); font-size: 11px; }
+@keyframes blink { 50% { opacity: .25; } }
+.logbox {
+  margin-top: 12px; max-height: 130px; overflow-y: auto; overscroll-behavior: contain;
+  font: 500 11px/1.7 var(--font-mono); color: var(--paper-ghost); white-space: pre-wrap;
+}
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
+}
+.stub-title { color: var(--rail-deep); border-bottom: 1px dashed var(--line-strong); padding-bottom: 10px; }
+.fineprint p { margin: 0 0 8px; font-size: 12px; line-height: 1.6; color: var(--muted); }
+.stamp { display: inline-block; border: 2px solid var(--rail-deep); color: var(--rail-deep); padding: 7px 9px; transform: rotate(-2deg); font-size: 12px; }
+.lasttrip { margin-top: auto; border-top: 1px dashed var(--line-strong); padding-top: 14px; }
+.lasttrip a { color: var(--blue); font-weight: 900; font-size: 13px; text-decoration: none; }
+.lasttrip small { display: block; color: var(--muted); font: 600 10px var(--font-mono); letter-spacing: .08em; margin-top: 4px; }
+.barcode-block { margin-top: 14px; }
+/* Signature 規則：條碼線寬序列由序號雜湊派生（同 render.mjs barcodeStyle），
+   這裡的 gradient 是 barcodeStyle('trip·ticket·studio') 的預算結果。 */
+.barcode {
+  height: 32px;
+  background-repeat: repeat-x;
+  background-image: linear-gradient(90deg,var(--ink) 0px 1px,transparent 1px 4px,var(--ink) 4px 5px,transparent 5px 7px,var(--ink) 7px 9px,transparent 9px 10px,var(--ink) 10px 11px,transparent 11px 12px,var(--ink) 12px 15px,transparent 15px 18px,var(--ink) 18px 20px,transparent 20px 22px,var(--ink) 22px 25px,transparent 25px 28px,var(--ink) 28px 29px,transparent 29px 32px,var(--ink) 32px 34px,transparent 34px 35px,var(--ink) 35px 37px,transparent 37px 40px,var(--ink) 40px 42px,transparent 42px 43px,var(--ink) 43px 44px,transparent 44px 47px,var(--ink) 47px 49px,transparent 49px 50px,var(--ink) 50px 51px,transparent 51px 52px,var(--ink) 52px 54px,transparent 54px 55px,var(--ink) 55px 56px,transparent 56px 57px,var(--ink) 57px 60px,transparent 60px 63px,var(--ink) 63px 65px,transparent 65px 66px,var(--ink) 66px 68px,transparent 68px 69px,var(--ink) 69px 71px,transparent 71px 73px,var(--ink) 73px 76px,transparent 76px 77px,var(--ink) 77px 80px,transparent 80px 81px,var(--ink) 81px 83px,transparent 83px 84px,var(--ink) 84px 87px,transparent 87px 90px,var(--ink) 90px 93px,transparent 93px 95px,var(--ink) 95px 98px,transparent 98px 101px,var(--ink) 101px 103px,transparent 103px 106px,var(--ink) 106px 109px,transparent 109px 111px,var(--ink) 111px 112px,transparent 112px 113px,var(--ink) 113px 115px,transparent 115px 117px,var(--ink) 117px 118px,transparent 118px 119px,var(--ink) 119px 120px,transparent 120px 123px,var(--ink) 123px 126px,transparent 126px 127px,var(--ink) 127px 128px,transparent 128px 131px,var(--ink) 131px 133px,transparent 133px 136px,var(--ink) 136px 138px,transparent 138px 139px,var(--ink) 139px 142px,transparent 142px 145px,var(--ink) 145px 147px,transparent 147px 149px,var(--ink) 149px 150px,transparent 150px 153px,var(--ink) 153px 156px,transparent 156px 159px);
+  background-size: 159px 100%;
+}
+.serial { font: 600 10px var(--font-mono); letter-spacing: .32em; color: var(--muted); text-transform: uppercase; margin-top: 6px; }
+.pagelist { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.pagelist a {
+  font: 900 10px "Archivo", sans-serif; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--ink); background: var(--paper-bright); border: 1px solid var(--line-btn); padding: 6px 9px; text-decoration: none;
+}
+.pagelist a:hover { background: var(--rail-press); color: var(--paper-bright); }
+/* 票夾：舊手冊＝一排小票根（撕角缺口沿用 pass 的語彙） */
+.wallet { display: grid; gap: 6px; margin-top: 8px; }
+.wallet-stub {
+  display: block; padding: 8px 10px 8px 14px; text-decoration: none;
+  background: var(--paper-bright); border: 1px solid var(--line);
+  clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px));
+}
+.wallet-stub b { display: block; font: 700 13px var(--font-body); color: var(--ink); }
+.wallet-stub small { font: 600 10px var(--font-mono); letter-spacing: .08em; color: var(--muted); text-transform: uppercase; }
+.wallet-stub:hover { border-color: var(--rail); }
+.wallet-stub:hover b { color: var(--rail-press); }
+.done-cta { display: none; margin-top: 20px; }
+.done-cta.show { display: inline-flex; }
+.done-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+/* 部署是次要動作：深底上的空票框（大膽額度留給紅 CTA 與條碼），alpha 邊線是 token 透明度變體。 */
+.cta-ghost { background: transparent; border: 1px solid rgba(255,248,234,.35); color: var(--paper-dim); }
+.cta-ghost:hover:not([aria-disabled="true"]), .cta-ghost:active:not([aria-disabled="true"]) { background: transparent; border-color: var(--gold); color: var(--paper-bright); }
+/* 部署中用 aria-disabled 不用 disabled：disable 聚焦中的按鈕會把鍵盤焦點丟回 body
+   （server 端 409 已防重複觸發，前端不靠 disabled 也安全）。 */
+.cta-ghost:disabled, .cta-ghost[aria-disabled="true"] { background: transparent; border-color: rgba(255,248,234,.2); color: var(--paper-ghost); cursor: wait; }
+@media (max-width: 900px) {
+  .ticket-grid { grid-template-columns: 1fr; }
+  .stub { border-left: 0; border-top: 1px dashed var(--line-strong); }
+  .stub::before, .stub::after { display: none; }
+}
+</style>
+</head>
+<body>
+<main class="page">
+  <div class="ticket-stack">
+    <section class="ticket">
+      <div class="ticket-grid">
+        <div class="main">
+          <div class="eyebrow">Trip Ticket Studio · Multi-Agent Pipeline</div>
+          <h1>一句話<br><span>出一疊車票</span></h1>
+          <p class="hint">把想去的旅程用一句話描述——目的地、大概日期、幾個人、步調偏好——剩下交給 agents：解析需求、查時差、上網做在地功課、排成逐日行程，最後印成車票風格的手冊。</p>
+          <div class="presets" role="group" aria-label="示範票根：撕一張把示範句填進輸入框，不會直接出票">
+            <div class="label" aria-hidden="true">Sample Stubs · 撕一張改成你的</div>
+            <button type="button" class="preset-stub" data-preset="weekend"><b>週末小旅</b><small>Weekend · 2 Days</small></button>
+            <button type="button" class="preset-stub" data-preset="multicity"><b>多城長途</b><small>Multi-City · 12 Days</small></button>
+            <button type="button" class="preset-stub" data-preset="daytrip"><b>一日遊</b><small>Day Trip · 1 Day</small></button>
+          </div>
+          <textarea id="sentence" name="sentence" aria-label="用一句話描述你的旅程" placeholder="例：十月中帶另一半從台北去京都四天，賞楓吃和食，步調放鬆不趕行程，搭大眾運輸"></textarea>
+          <div class="controls">
+            <button class="cta" id="punch">出票 · Punch It</button>
+            <label class="mockbox"><input type="checkbox" id="mock"> 測試模式（不呼叫 LLM）</label>
+          </div>
+          <div class="board" id="board">
+            <div id="agents"></div>
+            <div class="logbox" id="log"></div>
+            <p class="sr-only" id="announce" role="status" aria-live="polite"></p>
+            <div class="done-row">
+              <a class="cta done-cta" id="viewtrip" href="/trip/">手冊完成 · 打開來看</a>
+              <button type="button" class="cta cta-ghost done-cta" id="deploy">部署 · Wrangler Deploy</button>
+            </div>
+          </div>
+        </div>
+        <aside class="stub">
+          <div class="stub-title label">Boarding Info</div>
+          <div class="fineprint">
+            <p><span class="stamp">How it works</span></p>
+            <p>Trip Brief Agent 先把你的句子變成結構化需求；Timezone / Local Discovery（帶網路搜尋）並行做功課；Composer 合成逐日行程；渲染器印出封面與每日票券。</p>
+            <p>真實模式全程約 5–8 分鐘（網路搜尋佔大半）。過程中每個 agent 的狀態都會誠實記錄在手冊裡。</p>
+            <p>Gmail / Calendar agent 尚未接上 connector，會標記為 skipped。</p>
+          </div>
+          <div class="lasttrip" id="lasttrip"></div>
+          <div class="barcode-block" aria-hidden="true"><div class="barcode"></div><div class="serial" translate="no">trip·ticket·studio</div></div>
+        </aside>
+      </div>
+    </section>
+  </div>
+</main>
+<script>
+const AGENTS = ['Trip Brief Agent','Timezone Agent','Local Discovery Agent','Travel Context Agent','Calendar Agent','Itinerary Composer Agent','Poster Agent']
+const $ = (id) => document.getElementById(id)
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))
+let polling = null
+let lastAnnounced = ''
+
+function announce(text) {
+  if (text === lastAnnounced) return
+  lastAnnounced = text
+  $('announce').textContent = text
+}
+
+// client 端錯誤行要進 clientErrors：poll 每 1.5s 用 server log 整段重建 logbox，
+// 只 append 不入列的話（pipeline/deploy 還在吐 log 時）錯誤一閃就被洗掉。
+const clientErrors = []
+function logError(message) {
+  $('board').classList.add('show')
+  clientErrors.push(message)
+  if (clientErrors.length > 5) clientErrors.splice(0, clientErrors.length - 5)
+  $('log').textContent += (($('log').textContent ? '\n' : '') + message)
+  $('log').scrollTop = $('log').scrollHeight
+  announce(message)
+}
+
+// diff-guard：innerHTML 重建會摧毀鍵盤焦點、重置 blink 動畫（1.5s poll 對上 1s
+// 週期＝狀態燈永遠抽搐）——狀態沒變就不碰 DOM。
+let lastAgentsKey = ''
+function renderAgents(statuses, running) {
+  const key = JSON.stringify([statuses, running])
+  if (key === lastAgentsKey) return
+  lastAgentsKey = key
+  $('agents').innerHTML = AGENTS.map((name) => {
+    const s = esc(statuses[name] || (running ? 'running' : 'pending'))
+    return `<div class="agent-row" data-s="${s}"><span class="dot"></span><span>${esc(name.replace(' Agent',''))}</span><span class="agent-status">${s}</span></div>`
+  }).join('')
+}
+
+let lastWalletKey = ''
+function renderWallet(trip, trips) {
+  const key = JSON.stringify([trip, trips])
+  if (key === lastWalletKey) return
+  lastWalletKey = key
+  if (!trip) { $('lasttrip').innerHTML = '' ; return }
+  const pages = (trip.pages || []).filter((p) => p !== 'index.html')
+  const older = (trips || []).filter((t) => t.trip_id !== trip.trip_id).slice(0, 8)
+  $('lasttrip').innerHTML = `
+    <div class="label" style="color:var(--rail-deep);font-size:11px">Latest booklet</div>
+    <a href="/trip/">${esc(trip.destination)}</a>
+    <small>${esc(trip.days)} days · ${esc(trip.trip_id)}</small>
+    <div class="pagelist">
+      <a href="/trip/">Cover</a>
+      ${pages.map((p, i) => `<a href="/trip/${encodeURIComponent(p)}">Day ${i + 1}</a>`).join('')}
+    </div>
+    ${older.length ? `
+    <div class="label" style="color:var(--rail-deep);font-size:11px;margin-top:14px">Ticket wallet</div>
+    <div class="wallet">
+      ${older.map((t) => `<a class="wallet-stub" href="/trips/${encodeURIComponent(t.dir)}/"><b>${esc(t.destination)}</b><small>${esc(t.days)} days · ${esc(String(t.trip_id).split('_').at(-1).slice(0, 4))}</small></a>`).join('')}
+    </div>` : ''}`
+}
+
+let pollFailures = 0
+let lastLogText = ''
+let lastPipelinePhase = ''
+async function poll() {
+  let s
+  try {
+    const res = await fetch('/api/status')
+    s = await res.json()
+    pollFailures = 0
+  } catch {
+    pollFailures += 1
+    if (pollFailures === 3) logError('[warn] 連不上 studio server，繼續重試中——確認 npm run studio 還活著。')
+    return
+  }
+  renderWallet(s.trip, s.trips)
+  // 播報只對應「剛發生的轉換」：done/error 分支不准每輪 poll 重播（會蓋掉 deploy 三態的播報）。
+  const phaseChanged = s.phase !== lastPipelinePhase
+  lastPipelinePhase = s.phase
+  const deployActive = s.deploy && s.deploy.phase !== 'idle'
+  // board 先開再播報：#announce 在 #board 裡，祖先還是 display:none 時
+  // live region 不在 a11y tree，renderDeploy 的「部署中」會被 SR 丟棄。
+  if (s.phase !== 'idle' || deployActive) $('board').classList.add('show')
+  // deploy 是獨立狀態機：server 重啟後 pipeline phase 會回 idle，但殘留分頁仍可能觸發部署——
+  // 部署狀態與 log 不准被 idle 早退吃掉（錯誤要誠實印進 logbox）。
+  renderDeploy(s.deploy)
+  if (s.phase === 'idle' && !deployActive) return
+  renderAgents(s.agents, s.phase === 'running')
+  // logbox＝pipeline log＋deploy log＋client 端錯誤（合流，poll 重建才不會洗掉 409 之類的錯誤行）。
+  // diff-guard：內容沒變不碰 DOM；有變也只有人本來就在底部才跟捲，
+  // 否則部署跑幾十秒期間根本沒辦法回捲讀較早的 wrangler 錯誤行。
+  const logText = [...s.log.slice(-12), ...((s.deploy && s.deploy.log) || []).slice(-10), ...clientErrors].join('\n')
+  if (logText !== lastLogText) {
+    lastLogText = logText
+    const log = $('log')
+    const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 4
+    log.textContent = logText
+    if (atBottom) log.scrollTop = log.scrollHeight
+  }
+  if (s.phase === 'running') {
+    $('punch').disabled = true
+    $('punch').textContent = `Agents 工作中 · ${Math.round(s.elapsed_ms / 1000)}s`
+    const doneCount = Object.values(s.agents).filter((v) => v !== 'running' && v !== 'pending').length
+    announce(`Agents 工作中，${doneCount} / ${AGENTS.length} 完成`)
+  } else {
+    $('punch').disabled = false
+    $('punch').textContent = '出票 · Punch It'
+    // deploy 還在跑就不能停 poll（logbox 要繼續吐 wrangler 進度）。
+    if (!(s.deploy && s.deploy.phase === 'running')) { clearInterval(polling); polling = null }
+    if (s.phase === 'done') {
+      $('viewtrip').classList.add('show')
+      $('deploy').classList.add('show')
+      // 只在首次轉入 done 播報；deploy 進行中也讓位（部署狀態才是使用者剛觸發的事）。
+      if (phaseChanged && !deployActive) announce('手冊完成，可以打開來看')
+    }
+    if (s.phase === 'error' && phaseChanged) logError('[error] 出票失敗：' + (s.error || '原因不明，看 server log') + '——修正後再按一次「出票」。')
+  }
+}
+
+// 部署鈕狀態機（diff-guard 同 renderAgents）：文案永遠寫「會發生／發生了什麼」。
+// dedupe key 只看真正的狀態轉換（phase/url/error）——wrangler 每吐一行 log 都重跑三態
+// 等於整段部署期間 aria-live spam。
+let lastDeployKey = ''
+function renderDeploy(d) {
+  if (!d) return
+  const key = JSON.stringify([d.phase, d.url, d.error])
+  if (key === lastDeployKey) return
+  lastDeployKey = key
+  const btn = $('deploy')
+  // running 用 aria-disabled 不用 disabled：disable 聚焦中的按鈕會把鍵盤焦點丟回 body
+  //（Tab 得從頭走回來）；重複觸發由 server 端 409 擋。
+  if (d.phase === 'running') {
+    btn.setAttribute('aria-disabled', 'true')
+    btn.textContent = '部署中 · Wrangler 執行中'
+    announce('部署中，進度印在 log')
+  } else {
+    btn.removeAttribute('aria-disabled')
+    if (d.phase === 'done') {
+      btn.textContent = '已部署 · 再部署一次'
+      announce('部署完成' + (d.url ? '：' + d.url : ''))
+    } else if (d.phase === 'error') {
+      btn.textContent = '部署失敗 · 再試一次'
+      announce('部署失敗：' + (d.error || '看 log'))
+    } else {
+      btn.textContent = '部署 · Wrangler Deploy'
+    }
+  }
+}
+
+function startPolling() {
+  if (!polling) polling = setInterval(poll, 1500)
+  poll()
+}
+
+// Preset 示範票根：只填句子、不出票（出票永遠是使用者按「出票」才發生）。
+const PRESETS = {
+  weekend: '這個週末帶朋友從台北去台南兩天一夜，吃在地小吃逛老街，步調放鬆不排滿，高鐵來回',
+  multicity: '十月和另一半從台北飛歐洲十二天，想跑蘇黎世、琉森、米蘭三個城市，火車移動，重風景與市集，不趕行程',
+  daytrip: '找個週六從台北去九份平溪一日遊，兩大一小，看老街、放天燈，搭大眾運輸，晚上八點前回到家',
+}
+document.querySelectorAll('.preset-stub').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    $('sentence').value = PRESETS[btn.dataset.preset] || ''
+    $('sentence').focus()
+  })
+})
+
+$('punch').addEventListener('click', async () => {
+  const sentence = $('sentence').value.trim()
+  const mock = $('mock').checked
+  if (!sentence && !mock) { $('sentence').focus(); return }
+  $('viewtrip').classList.remove('show')
+  $('deploy').classList.remove('show')
+  let res
+  try {
+    res = await fetch('/api/plan', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ sentence, mock }),
+    })
+  } catch {
+    logError('[error] 連不到 studio server——確認 npm run studio 還在跑，再按一次「出票」。')
+    return
+  }
+  if (!res.ok) {
+    const e = await res.json().catch(() => ({}))
+    logError('[error] 出票沒有開始：' + (e.error || `server 回了 ${res.status}`) + '——修正後再按一次「出票」。')
+    return
+  }
+  $('board').classList.add('show')
+  startPolling()
+})
+
+// 部署：按了才跑（manifest 的 deployment_status 停在 awaiting_approval，這顆就是 approval）。
+$('deploy').addEventListener('click', async () => {
+  if ($('deploy').getAttribute('aria-disabled') === 'true') return
+  let res
+  try {
+    res = await fetch('/api/deploy', { method: 'POST' })
+  } catch {
+    logError('[error] 連不到 studio server——確認 npm run studio 還在跑，再按一次「部署」。')
+    return
+  }
+  if (!res.ok) {
+    const e = await res.json().catch(() => ({}))
+    logError('[error] 部署沒有開始：' + (e.error || `server 回了 ${res.status}`))
+    return
+  }
+  startPolling()
+})
+
+startPolling()
+</script>
+</body>
+</html>

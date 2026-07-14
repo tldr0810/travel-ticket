@@ -1,0 +1,26 @@
+{
+  "name": "trip-ticket-pipeline",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "studio": "node pipeline/server.mjs",
+    "plan": "node pipeline/orchestrator.mjs",
+    "plan:mock": "node pipeline/orchestrator.mjs --mock",
+    "demo": "node scripts/generate-itinerary-preview.mjs",
+    "deploy": "wrangler deploy --config wrangler.itinerary.toml",
+    "test": "node --test tests/"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.71.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240729.0",
+    "typescript": "^5.5.0",
+    "wrangler": "^3.65.0"
+  },
+  "allowScripts": {
+    "esbuild@0.17.19": true,
+    "workerd@1.20250718.0": true
+  }
+}

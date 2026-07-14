@@ -1,0 +1,5 @@
+node_modules/
+.trip_work/
+dist/
+data/posters/
+.env
