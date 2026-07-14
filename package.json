@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "studio": "node pipeline/server.mjs",
+    "mcp": "node pipeline/mcp-server.mjs",
     "plan": "node pipeline/orchestrator.mjs",
     "plan:mock": "node pipeline/orchestrator.mjs --mock",
     "demo": "node scripts/generate-itinerary-preview.mjs",
