@@ -8,6 +8,7 @@
     "plan": "node pipeline/orchestrator.mjs",
     "plan:mock": "node pipeline/orchestrator.mjs --mock",
     "demo": "node scripts/generate-itinerary-preview.mjs",
+    "composio:smoke": "node scripts/composio-smoke.mjs",
     "deploy": "wrangler deploy --config wrangler.itinerary.toml",
     "test": "node --test 'tests/*.test.mjs'"
   },

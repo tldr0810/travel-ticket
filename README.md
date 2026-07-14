@@ -10,8 +10,9 @@
 一句話 ─▶ Trip Brief Agent (LLM, structured output)
               ├─ Timezone Agent        (純程式，Intl 計算時差/DST)
               ├─ Local Discovery Agent (LLM + web search，官方來源)
-              ├─ Travel Context Agent  (stub：待接 Gmail connector)
-              └─ Calendar Agent        (stub：待接 Calendar connector)
+              ├─ Travel Context Agent  (Gmail via Composio MCP，無 key 自動 skip)
+              ├─ Calendar Agent        (Google Calendar via Composio MCP，無 key 自動 skip)
+              └─ Notion Agent          (Notion via Composio MCP，無 key 自動 skip)
           Itinerary Composer Agent (LLM) ─▶ final_itinerary.json ─▶ dist/ 網站
 ```
 
@@ -93,14 +94,41 @@ LLM backend 自動選擇（也可用 `--backend=sdk|cli` 強制指定）：
 - `cover`：封面文案（標題、eyebrow、route stops、stats）——Composer 產生，渲染器也能自行推導
 - `actions_suggested`：後續動作（訂票確認、寫入 Calendar 等），全部 `requires_approval: true`
 
+## Connectors (Composio)
+
+`pipeline/agents.mjs` 裡的 `runTravelContextAgent`（Gmail）、`runCalendarAgent`
+（Google Calendar）、`runNotionAgent`（Notion）都走 Composio 的 dynamic-tools
+MCP server（`pipeline/composio.mjs`），把使用者自己的信箱/日曆/Notion 內容
+讀進來輔助 Composer；沒有帳號授權也完全不影響出票，只是那個 agent 會誠實
+回報 `skipped`。
+
+- **拿 key**：Composio dashboard 的 MCP 頁面（key 會輪替，dashboard 才是唯一
+  真實來源，不要把 key 寫死在別的地方）。
+- **設定**：加進 `~/.zshrc`（或你的 shell rc）：
+  ```bash
+  export COMPOSIO_API_KEY="ck_..."
+  ```
+  設定完記得開新的 shell（或 `source ~/.zshrc`）讓 `npm run plan` / studio 讀到。
+- **沒有 key 時**：三個 connector agent 全部自動降級成 `skipped`（`bookings`/
+  `events`/`travel_notes` 都是空陣列），出票流程照跑，不會因此失敗。
+- **這是單人工具**：每個人用自己的 Composio key，帳號授權（Gmail/Calendar/
+  Notion）也是各自在 Composio dashboard 上連的，彼此不共用。
+- **Smoke test**（打真的 Composio + 真的 LLM，不算進 `npm test`）：
+  ```bash
+  COMPOSIO_API_KEY="$(sed -n 's/^export COMPOSIO_API_KEY="\(.*\)"/\1/p' ~/.zshrc)" npm run composio:smoke
+  ```
+  輸出範例（gmail/calendar 已連線、notion 未連線）：
+  ```
+  gmail: status=ok items=0 (2.6s) — No booking-looking emails found in the last 180 days.
+  calendar: status=ok items=1 (3.6s) — Found 1 calendar event(s) inside the trip window.
+  notion: status=skipped items=0 (2.5s) — Notion check skipped: COMPOSIO_MULTI_EXECUTE_TOOL: 1 out of 1 tools failed
+  ```
+
 ## 部署
 ```bash
 npx wrangler deploy --config wrangler.itinerary.toml
 ```
 
 ## 還沒接的東西
-- **Gmail / Calendar connector**：`pipeline/agents.mjs` 裡的 `runTravelContextAgent`
-  / `runCalendarAgent` 目前是誠實回報 skipped 的 stub。接上 MCP/Composio 後，
-  把查到的 bookings/events 回傳即可，Composer 已會把它們納入輸入。
 - **自動部署**：orchestrator 產出後停在 `deployment_status: awaiting_approval`，
   部署仍是手動指令。
