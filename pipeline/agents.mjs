@@ -422,12 +422,30 @@ export async function runTravelContextAgent(ctx, brief, deps = {}) {
   }
 }
 
-export async function runCalendarAgent() {
-  return {
-    status: 'skipped',
-    confidence: 0,
-    notes: 'No Calendar connector configured; fixed events were not checked.',
-    events: [],
+export async function runCalendarAgent(ctx, brief, deps = {}) {
+  if (!composioEnabled()) {
+    return { status: 'skipped', confidence: 0, notes: 'COMPOSIO_API_KEY not set; fixed events were not checked.', events: [] }
+  }
+  try {
+    const session = await (deps.session ? deps.session() : mcpSession())
+    const data = await session.execToolkitTool('GOOGLECALENDAR_EVENTS_LIST', {
+      calendarId: 'primary',
+      timeMin: `${brief.start_date}T00:00:00Z`,
+      timeMax: `${brief.end_date}T23:59:59Z`,
+      singleEvents: true,
+      orderBy: 'startTime',
+      maxResults: 50,
+    })
+    const items = data?.items ?? data?.events ?? []
+    const events = items.map((e) => ({
+      title: e.summary ?? '(untitled)',
+      start: e.start?.dateTime ?? e.start?.date ?? '',
+      end: e.end?.dateTime ?? e.end?.date ?? '',
+      all_day: Boolean(e.start?.date && !e.start?.dateTime),
+    }))
+    return { status: 'ok', confidence: 0.9, notes: `Found ${events.length} calendar event(s) inside the trip window.`, events }
+  } catch (error) {
+    return { status: 'skipped', confidence: 0, notes: `Calendar check skipped: ${error.message}`, events: [] }
   }
 }
 

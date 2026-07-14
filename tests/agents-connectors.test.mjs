@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { runTravelContextAgent } from '../pipeline/agents.mjs'
+import { runTravelContextAgent, runCalendarAgent } from '../pipeline/agents.mjs'
 
 const BRIEF = { destination: 'Japan: Kyoto & Osaka', start_date: '2026-09-10', end_date: '2026-09-13' }
 
@@ -57,4 +57,38 @@ test('gmail agent: llm garbage twice → ok + empty bookings (no bad data downst
   assert.equal(n, 2) // one retry
   assert.equal(r.status, 'ok')
   assert.deepEqual(r.bookings, [])
+})
+
+test('calendar agent skips without key', async () => {
+  delete process.env.COMPOSIO_API_KEY
+  const r = await runCalendarAgent(null, BRIEF)
+  assert.equal(r.status, 'skipped')
+})
+
+test('calendar agent maps events deterministically', async () => {
+  process.env.COMPOSIO_API_KEY = 'ck_test'
+  let captured
+  const session = {
+    execToolkitTool: async (slug, args) => {
+      captured = { slug, args }
+      return { items: [
+        { summary: 'Board meeting', start: { dateTime: '2026-09-11T09:00:00+09:00' }, end: { dateTime: '2026-09-11T10:00:00+09:00' } },
+        { summary: 'Holiday', start: { date: '2026-09-12' }, end: { date: '2026-09-13' } },
+      ] }
+    },
+  }
+  const r = await runCalendarAgent(null, BRIEF, { session: async () => session })
+  assert.equal(captured.slug, 'GOOGLECALENDAR_EVENTS_LIST')
+  assert.equal(captured.args.timeMin, '2026-09-10T00:00:00Z')
+  assert.equal(r.status, 'ok')
+  assert.equal(r.events.length, 2)
+  assert.equal(r.events[1].all_day, true)
+})
+
+test('calendar agent: tool error → skipped', async () => {
+  process.env.COMPOSIO_API_KEY = 'ck_test'
+  const session = { execToolkitTool: async () => { throw new Error('no active connection') } }
+  const r = await runCalendarAgent(null, BRIEF, { session: async () => session })
+  assert.equal(r.status, 'skipped')
+  assert.match(r.notes, /no active connection/)
 })

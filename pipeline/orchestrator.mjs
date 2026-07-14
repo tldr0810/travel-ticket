@@ -412,7 +412,7 @@ async function main() {
       ? (recordStatus('Local Discovery Agent', 'completed', 1, 'Mock discovery.'), log('Local Discovery Agent: completed (mock)'), Promise.resolve({ ok: true, result: MOCK_DISCOVERY }))
       : supervise('Local Discovery Agent', () => runLocalDiscoveryAgent(ctx, brief), { confidence: 0.8 }),
     supervise('Travel Context Agent', () => runTravelContextAgent(ctx, brief)),
-    supervise('Calendar Agent', () => runCalendarAgent(brief)),
+    supervise('Calendar Agent', () => runCalendarAgent(ctx, brief)),
   ])
 
   const timezone = timezoneRun.ok ? timezoneRun.result : runTimezoneAgent({ ...brief, destination_timezone: 'UTC', home_timezone: 'UTC' })
