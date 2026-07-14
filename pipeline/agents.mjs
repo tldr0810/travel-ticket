@@ -77,7 +77,8 @@ async function runCliJson({ system, prompt, schema, webSearch = false }) {
   return extractJson(envelope.result)
 }
 
-// Backend-agnostic structured-output call (sdk or cli), shared by connector agents.
+// Backend-agnostic structured-output call (sdk or cli), shared by connector
+// agents and (as runStructuredJson) by the trip pipeline for theme work.
 async function runJson(ctx, { system, prompt, schema, maxTokens = 4000 }) {
   if (!ctx) throw new Error('no LLM context')
   if (ctx.backend === 'cli') return runCliJson({ system, prompt, schema })
@@ -90,6 +91,8 @@ async function runJson(ctx, { system, prompt, schema, maxTokens = 4000 }) {
   })
   return parseStructured(response)
 }
+
+export { runJson as runStructuredJson }
 
 // ---------------------------------------------------------------------------
 // Timezone helpers (also used by the orchestrator for local-time → UTC)
