@@ -41,6 +41,20 @@ test('disallowed keys and bad hex are stripped→rejected before contrast', asyn
   assert.equal(r.ok, false)
 })
 
+test('llm resolving undefined twice → resolves ok:false (never rejects)', async () => {
+  const llm = async () => undefined
+  const r = await generateCustomTheme({ destination: 'X', style: 'y', llm })
+  assert.equal(r.ok, false)
+  assert.match(r.reason, /no result/i)
+})
+
+test('CUSTOM_ALLOWED_KEYS is exactly the 12-key security allowlist', () => {
+  assert.deepEqual(
+    [...CUSTOM_ALLOWED_KEYS].sort(),
+    ['blue', 'board', 'board-edge', 'board-hi', 'board-lo', 'gold', 'green', 'night', 'rail', 'rail-deep', 'rail-press', 'stamp'],
+  )
+})
+
 test('llm throws twice → ok:false', async () => {
   const llm = async () => { throw new Error('boom') }
   const r = await generateCustomTheme({ destination: 'X', style: 'y', llm })

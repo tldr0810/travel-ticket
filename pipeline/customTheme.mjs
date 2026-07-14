@@ -29,13 +29,17 @@ const gate = (tokens) => {
 }
 
 export async function generateCustomTheme({ destination, style, llm }) {
-  const template = fs.readFileSync(PROMPT_PATH, 'utf8')
+  let template
+  try { template = fs.readFileSync(PROMPT_PATH, 'utf8') } catch (e) {
+    return { ok: false, reason: `prompt template missing: ${e.message}`, failures: [] }
+  }
   const prompt = template.replace('{{DESTINATION}}', destination).replace('{{USER_STYLE}}', style || '(none)')
   const system = 'You are the theme generator for a retro train-ticket travel product. Respond with strict JSON only.'
   let out
   try { out = await llm({ system, prompt, schema: THEME_SCHEMA }) } catch (e) {
     return { ok: false, reason: `theme generation failed: ${e.message}`, failures: [] }
   }
+  if (!out || typeof out !== 'object') return { ok: false, reason: 'theme generation returned no result', failures: [] }
   let check = gate(out?.tokens ?? {})
   if (check.pass) return { ok: true, tokens: out.tokens, motifs: out.motifs ?? {}, name: out.name, rationale: out.rationale ?? '' }
 
@@ -44,6 +48,7 @@ export async function generateCustomTheme({ destination, style, llm }) {
   try { out = await llm({ system, prompt: repairPrompt, schema: THEME_SCHEMA }) } catch (e) {
     return { ok: false, reason: `theme repair failed: ${e.message}`, failures: check.failures }
   }
+  if (!out || typeof out !== 'object') return { ok: false, reason: 'theme repair returned no result', failures: check.failures }
   check = gate(out?.tokens ?? {})
   if (check.pass) return { ok: true, tokens: out.tokens, motifs: out.motifs ?? {}, name: out.name, rationale: out.rationale ?? '' }
   return { ok: false, reason: 'contrast gate failed after repair', failures: check.failures }
