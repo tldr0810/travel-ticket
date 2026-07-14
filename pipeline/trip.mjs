@@ -26,7 +26,8 @@ import {
   localToUtc,
 } from './agents.mjs'
 import { THEMES, resolveTheme, recommendThemes, CUSTOM_OPTION } from './themes.mjs'
-import { generateCustomTheme } from './customTheme.mjs'
+import { generateCustomTheme, CUSTOM_ALLOWED_KEYS } from './customTheme.mjs'
+import { validateOverrides } from './contrast.mjs'
 import { renderItinerary } from './render.mjs'
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -37,6 +38,17 @@ export const tripsDataDir = path.join(packageRoot, 'data', 'trips')
 export const saveTripJson = (itin) => {
   fs.mkdirSync(tripsDataDir, { recursive: true })
   fs.writeFileSync(path.join(tripsDataDir, `${tripDirName(itin)}.json`), JSON.stringify(itin, null, 2))
+}
+
+// customTokensFrom — reproduces a custom re-render from a saved itinerary JSON:
+// only trusts itinerary.custom_theme.tokens if it's a non-empty plain object
+// AND passes the same allowlist/hex gate the generator itself is held to.
+// Anything else (missing, tampered key, tampered value) → null, so callers
+// fall back to the registered theme instead of a corrupted/unsafe override.
+export function customTokensFrom(itinerary) {
+  const tokens = itinerary?.custom_theme?.tokens
+  if (!tokens || typeof tokens !== 'object' || Array.isArray(tokens) || Object.keys(tokens).length === 0) return null
+  return validateOverrides(tokens, CUSTOM_ALLOWED_KEYS).ok ? tokens : null
 }
 
 // ---------------------------------------------------------------------------
@@ -424,6 +436,9 @@ export async function renderTicket(plan, choice, { skipRender = false, log = con
     if (result.ok) {
       customTokens = result.tokens
       themeName = 'default' // registered base; custom tokens override at render time
+      // result.motifs (stampText/eyebrow) is deliberately unused here — wiring it would
+      // interpolate raw LLM output into rendered SVG/HTML. See DEVIATION note in
+      // .superpowers/sdd/progress.md; deferred pending an escaped render path.
       themeUsed = { name: result.name, custom: true, rationale: result.rationale }
     } else {
       themeName = fallbackName

@@ -28,6 +28,12 @@ const gate = (tokens) => {
   return checkTokens({ ...DEFAULT_TOKENS, ...tokens })
 }
 
+// isUsableTokens — an honest pre-gate check: `out.tokens` must be a non-empty
+// plain object before we even try validateOverrides/checkTokens. Without this,
+// an LLM response with no usable tokens (missing, an array, or {}) can slip
+// through gate({}) as "no problems, no failures" → false ok:true.
+const isUsableTokens = (t) => t !== null && typeof t === 'object' && !Array.isArray(t) && Object.keys(t).length > 0
+
 export async function generateCustomTheme({ destination, style, llm }) {
   let template
   try { template = fs.readFileSync(PROMPT_PATH, 'utf8') } catch (e) {
@@ -40,7 +46,8 @@ export async function generateCustomTheme({ destination, style, llm }) {
     return { ok: false, reason: `theme generation failed: ${e.message}`, failures: [] }
   }
   if (!out || typeof out !== 'object') return { ok: false, reason: 'theme generation returned no result', failures: [] }
-  let check = gate(out?.tokens ?? {})
+  if (!isUsableTokens(out.tokens)) return { ok: false, reason: 'theme generation returned no usable tokens', failures: [] }
+  let check = gate(out.tokens)
   if (check.pass) return { ok: true, tokens: out.tokens, motifs: out.motifs ?? {}, name: out.name, rationale: out.rationale ?? '' }
 
   // one repair retry: feed the failing pairs back
@@ -49,7 +56,8 @@ export async function generateCustomTheme({ destination, style, llm }) {
     return { ok: false, reason: `theme repair failed: ${e.message}`, failures: check.failures }
   }
   if (!out || typeof out !== 'object') return { ok: false, reason: 'theme repair returned no result', failures: check.failures }
-  check = gate(out?.tokens ?? {})
+  if (!isUsableTokens(out.tokens)) return { ok: false, reason: 'theme generation returned no usable tokens', failures: check.failures }
+  check = gate(out.tokens)
   if (check.pass) return { ok: true, tokens: out.tokens, motifs: out.motifs ?? {}, name: out.name, rationale: out.rationale ?? '' }
   return { ok: false, reason: 'contrast gate failed after repair', failures: check.failures }
 }

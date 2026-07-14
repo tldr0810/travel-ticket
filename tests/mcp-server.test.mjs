@@ -63,6 +63,17 @@ test('plan_trip (mock) → render_ticket round-trip', async () => {
   } finally { s.kill() }
 })
 
+test('tools/call with unknown tool name → protocol error -32602 (not isError)', async () => {
+  const s = rpcSession()
+  try {
+    await s.request({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 't', version: '0' } } })
+    s.send({ jsonrpc: '2.0', method: 'notifications/initialized' })
+    const r = await s.request({ jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name: 'bogus_tool', arguments: {} } })
+    assert.equal(r.error.code, -32602)
+    assert.equal(r.result, undefined)
+  } finally { s.kill() }
+})
+
 test('render_ticket with unknown plan_id → isError', async () => {
   const s = rpcSession()
   try {

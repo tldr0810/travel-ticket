@@ -1254,6 +1254,11 @@ export function renderItinerary(itinerary, { outDir, customTokens }) {
   // theme 只讀欄位、不推斷（舊 JSON 一律 default——回歸鐵律）。
   const themeName = THEMES[itinerary.theme] ? itinerary.theme : 'default'
   const themeMotifs = THEMES[themeName].motifs || {}
+  // Trust boundary: customTokens values are interpolated UNESCAPED into raw CSS
+  // below. Callers MUST already have run them through the customTheme gate
+  // (pipeline/customTheme.mjs) or customTokensFrom (pipeline/trip.mjs) — both
+  // enforce an allowlisted key set and a strict #rrggbb hex value shape via
+  // validateOverrides (pipeline/contrast.mjs). Never pass unvalidated input here.
   const customCss = customTokens && Object.keys(customTokens).length
     ? `\n:root{${Object.entries(customTokens).map(([k, v]) => `--${k}:${v}`).join(';')};}`
     : ''

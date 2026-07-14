@@ -55,6 +55,20 @@ test('CUSTOM_ALLOWED_KEYS is exactly the 12-key security allowlist', () => {
   )
 })
 
+test('llm returns array tokens → ok:false', async () => {
+  const llm = async () => ([])
+  const r = await generateCustomTheme({ destination: 'X', style: 'y', llm })
+  assert.equal(r.ok, false)
+  assert.match(r.reason, /no usable tokens/)
+})
+
+test('llm returns empty-object tokens → ok:false', async () => {
+  const llm = async () => ({ name: 'x', tokens: {} })
+  const r = await generateCustomTheme({ destination: 'X', style: 'y', llm })
+  assert.equal(r.ok, false)
+  assert.match(r.reason, /no usable tokens/)
+})
+
 test('llm throws twice → ok:false', async () => {
   const llm = async () => { throw new Error('boom') }
   const r = await generateCustomTheme({ destination: 'X', style: 'y', llm })
