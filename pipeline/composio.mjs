@@ -66,8 +66,9 @@ export async function mcpSession({ timeoutMs = DEFAULT_TIMEOUT_MS, fetchImpl = f
       current_step: slug,
     })
     const item = Array.isArray(data?.results) ? data.results[0] : data
-    if (item?.successful === false || item?.error) throw new Error(`${slug}: ${item.error || 'execution failed'}`)
-    return item?.data ?? item
+    const payload = item?.response ?? item
+    if (payload?.successful === false || payload?.error) throw new Error(`${slug}: ${payload.error || 'execution failed'}`)
+    return payload?.data ?? payload
   }
 
   return { callTool, execToolkitTool }

@@ -67,7 +67,7 @@ test('execToolkitTool unwraps MULTI_EXECUTE result item', async () => {
     'notifications/initialized': () => res(''),
     'tools/call': (req) => {
       captured = req.params
-      return res(okText({ successful: true, data: { results: [{ tool_slug: 'GMAIL_FETCH_EMAILS', successful: true, data: { messages: [] } }] } }))
+      return res(okText({ successful: true, data: { results: [{ tool_slug: 'GMAIL_FETCH_EMAILS', index: 0, response: { successful: true, data: { messages: [] } } }], total_count: 1, success_count: 1, error_count: 0 } }))
     },
   })
   const s = await mcpSession({ fetchImpl })
@@ -75,4 +75,15 @@ test('execToolkitTool unwraps MULTI_EXECUTE result item', async () => {
   assert.equal(captured.name, 'COMPOSIO_MULTI_EXECUTE_TOOL')
   assert.equal(captured.arguments.tools[0].tool_slug, 'GMAIL_FETCH_EMAILS')
   assert.deepEqual(out, { messages: [] })
+})
+
+test('execToolkitTool rejects when result item response fails', async () => {
+  process.env.COMPOSIO_API_KEY = 'ck_test'
+  const fetchImpl = fakeFetch({
+    initialize: () => res(okText({}), { headers: { 'mcp-session-id': 'sid-1' } }),
+    'notifications/initialized': () => res(''),
+    'tools/call': () => res(okText({ successful: true, data: { results: [{ tool_slug: 'GMAIL_FETCH_EMAILS', index: 0, response: { successful: false, error: 'no active connection' } }], total_count: 1, success_count: 0, error_count: 1 } })),
+  })
+  const s = await mcpSession({ fetchImpl })
+  await assert.rejects(() => s.execToolkitTool('GMAIL_FETCH_EMAILS', { query: 'x' }), /no active connection/)
 })
