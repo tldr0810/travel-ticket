@@ -15,8 +15,18 @@ export const DEFAULT_TOKENS = {
 }
 
 export const THEMES = {
-  default: { tokens: {}, motifs: {} },
+  default: {
+    label: '經典 · 瑞士鐵路紅',
+    blurb: '乾淨紅白票面,復古火車票原味,通用耐看',
+    regions: ['switzerland', 'europe', '瑞士', 'generic'],
+    mood: ['經典', '明快', '通用'],
+    tokens: {}, motifs: {},
+  },
   japan: {
+    label: '日本 · JR 青綠票',
+    blurb: '青綠油墨票面+朱紅判子(済),日本鐵路車票感',
+    regions: ['japan', '日本', 'Asia/Tokyo'],
+    mood: ['復古', '鐵道', '沉靜'],
     // 日本 JR 車票感：青綠油墨的票面 + 朱紅判子（済）。全部過 check-theme-contrast.mjs。
     tokens: {
       rail: '#0b7d6e',          // JR 青綠：撕孔、色條、大字、travel 類（非內文用途）
@@ -75,4 +85,48 @@ export function themeCss(name) {
   if (!entries.length && !pattern) return ''
   const root = entries.length ? `\n:root{${entries.map(([k, v]) => `--${k}:${v}`).join(';')};}` : ''
   return root + pattern
+}
+
+export const CUSTOM_OPTION = { enabled: true, label: '✏️ 自己描述', hint: '用一句話講你要的風格' }
+
+const RECOMMEND_SCHEMA = {
+  type: 'object',
+  properties: {
+    picks: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: { name: { type: 'string' }, why: { type: 'string' } },
+        required: ['name', 'why'],
+      },
+    },
+  },
+  required: ['picks'],
+}
+
+// 目的地聰明推薦:LLM 只從「已通過對比的註冊 preset」裡挑(零對比風險),
+// 失敗走 resolveTheme 確定性 fallback。回 1–3 個 UNIQUE preset,永不 throw。
+export async function recommendThemes({ destination, brief = {}, llm }) {
+  const catalog = Object.entries(THEMES).map(([name, t]) => ({ name, label: t.label, blurb: t.blurb, regions: t.regions, mood: t.mood }))
+  const decorate = (name, why) => ({ name, label: THEMES[name].label, blurb: THEMES[name].blurb, why })
+  let picked = []
+  if (llm) {
+    try {
+      const out = await llm({
+        system: 'You pick ticket design themes for a travel-ticket product. Pick ONLY from the given catalog names. Rank up to 3, best cultural/mood fit for the destination first, and give a one-sentence reason each, in the language of the destination description.',
+        prompt: `Destination: ${destination}\nBrief: ${JSON.stringify(brief)}\nCatalog: ${JSON.stringify(catalog)}`,
+        schema: RECOMMEND_SCHEMA,
+      })
+      const seen = new Set()
+      for (const p of out?.picks ?? []) {
+        if (THEMES[p.name] && !seen.has(p.name)) { seen.add(p.name); picked.push(decorate(p.name, p.why)) }
+      }
+    } catch { picked = [] }
+  }
+  if (!picked.length) {
+    const first = resolveTheme({ destination_timezone: brief.destination_timezone, destination })
+    const rest = Object.keys(THEMES).filter((n) => n !== first)
+    picked = [decorate(first, '依目的地自動判斷最合適'), ...rest.map((n) => decorate(n, '通用備選'))]
+  }
+  return picked.slice(0, 3)
 }
