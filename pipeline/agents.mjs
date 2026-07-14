@@ -448,6 +448,60 @@ export async function runCalendarAgent(ctx, brief, deps = {}) {
   }
 }
 
+const NOTES_SCHEMA = {
+  type: 'object',
+  properties: {
+    travel_notes: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          title: { type: 'string' },
+          note: { type: 'string' },
+          location: { type: 'string' },
+          url: { type: 'string' },
+          category: { type: 'string' },
+        },
+        required: ['title'],
+      },
+    },
+  },
+  required: ['travel_notes'],
+}
+
+export async function runNotionAgent(ctx, brief, deps = {}) {
+  if (!composioEnabled()) {
+    return { status: 'skipped', confidence: 0, notes: 'COMPOSIO_API_KEY not set; Notion notes were not checked.', travel_notes: [] }
+  }
+  try {
+    const session = await (deps.session ? deps.session() : mcpSession())
+    const destWord = String(brief?.destination || '').split(/[:,&，、]/)[0].trim()
+    const found = await session.execToolkitTool('NOTION_SEARCH_NOTION_PAGE', { query: destWord, page_size: 5, filter_value: 'page' })
+    const pages = (found?.results ?? []).filter((p) => p?.id)
+    if (!pages.length) return { status: 'ok', confidence: 0.6, notes: 'No Notion pages matched the destination.', travel_notes: [] }
+    const mds = []
+    for (const p of pages.slice(0, 3)) {
+      try {
+        const md = await session.execToolkitTool('NOTION_GET_PAGE_MARKDOWN', { page_id: p.id })
+        mds.push(`--- PAGE: ${p.title ?? p.id} ---\n${String(md?.markdown ?? '').slice(0, 6000)}`)
+      } catch { /* one bad page never kills the agent */ }
+    }
+    if (!mds.length) return { status: 'ok', confidence: 0.5, notes: 'Notion pages found but none readable.', travel_notes: [] }
+    const llm = deps.llm ?? ((req) => runJson(ctx, req))
+    const req = {
+      system: 'You extract travel-relevant notes (POIs, restaurants, bookings, checklists) from the user\'s own Notion pages. Only extract what is literally present; never invent. Empty array if nothing relevant.',
+      prompt: `Trip: ${brief.destination}, ${brief.start_date}→${brief.end_date}.\n\n${mds.join('\n\n')}`,
+      schema: NOTES_SCHEMA,
+    }
+    let extracted
+    try { extracted = await llm(req) } catch { try { extracted = await llm(req) } catch { extracted = null } }
+    const travel_notes = Array.isArray(extracted?.travel_notes) ? extracted.travel_notes : []
+    return { status: 'ok', confidence: travel_notes.length ? 0.7 : 0.6, notes: `Read ${mds.length} Notion page(s); extracted ${travel_notes.length} note(s).`, travel_notes }
+  } catch (error) {
+    return { status: 'skipped', confidence: 0, notes: `Notion check skipped: ${error.message}`, travel_notes: [] }
+  }
+}
+
 export async function runComposerAgent(ctx, { sentence, brief, timezone, discovery, context, calendar }) {
   const composerSystem = [
     'You are the Itinerary Composer Agent in a travel-planning pipeline. Compose a realistic day-by-day itinerary from the agent inputs.',

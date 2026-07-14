@@ -26,6 +26,7 @@ import {
   runTimezoneAgent,
   runTravelContextAgent,
   runCalendarAgent,
+  runNotionAgent,
   runComposerAgent,
   runPosterAgent,
   localToUtc,
@@ -128,6 +129,7 @@ const TIMEOUTS = {
   'Local Discovery Agent': 420_000,
   'Travel Context Agent': 60_000,
   'Calendar Agent': 60_000,
+  'Notion Agent': 60_000,
   'Itinerary Composer Agent': 600_000,
   'Poster Agent': 300_000,
 }
@@ -304,7 +306,7 @@ const MOCK_DISCOVERY = {
 // 全 CJK 目的地會被字元過濾清空——fallback 'trip'，讓 slug 至少是 trip-<年份>。
 const slugify = (text) => text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'trip'
 
-function assembleItinerary({ tripId, brief, timezone, discovery, composed, contextResult, calendarResult, themeName, posterResult }) {
+function assembleItinerary({ tripId, brief, timezone, discovery, composed, contextResult, calendarResult, notionResult, themeName, posterResult }) {
   const dtz = brief.destination_timezone
   const days = composed.days.map((day) => ({
     date: day.date,
@@ -353,7 +355,7 @@ function assembleItinerary({ tripId, brief, timezone, discovery, composed, conte
       ...(posterResult?.backend ? { poster: 'poster.png' } : {}),
       ...(posterResult?.prompt ? { poster_prompt: posterResult.prompt } : {}),
     },
-    context: { bookings: contextResult?.bookings ?? [], calendar_events: calendarResult?.events ?? [] },
+    context: { bookings: contextResult?.bookings ?? [], calendar_events: calendarResult?.events ?? [], travel_notes: notionResult?.travel_notes ?? [] },
   }
 
   itinerary.timeline_json = {
@@ -407,12 +409,13 @@ async function main() {
 
   // Stage 2 — parallel context gathering
   const timezoneRun = await supervise('Timezone Agent', async () => runTimezoneAgent(brief), { confidence: 0.99 })
-  const [discoveryRun, contextRun, calendarRun] = await Promise.all([
+  const [discoveryRun, contextRun, calendarRun, notionRun] = await Promise.all([
     mock
       ? (recordStatus('Local Discovery Agent', 'completed', 1, 'Mock discovery.'), log('Local Discovery Agent: completed (mock)'), Promise.resolve({ ok: true, result: MOCK_DISCOVERY }))
       : supervise('Local Discovery Agent', () => runLocalDiscoveryAgent(ctx, brief), { confidence: 0.8 }),
     supervise('Travel Context Agent', () => runTravelContextAgent(ctx, brief)),
     supervise('Calendar Agent', () => runCalendarAgent(ctx, brief)),
+    supervise('Notion Agent', () => runNotionAgent(ctx, brief)),
   ])
 
   const timezone = timezoneRun.ok ? timezoneRun.result : runTimezoneAgent({ ...brief, destination_timezone: 'UTC', home_timezone: 'UTC' })
@@ -427,7 +430,8 @@ async function main() {
   } else {
     const composerRun = await supervise('Itinerary Composer Agent', () => runComposerAgent(ctx, {
       sentence, brief, timezone, discovery,
-      context: contextRun.result, calendar: calendarRun.result,
+      context: { ...(contextRun.result ?? { bookings: [] }), travel_notes: notionRun.result?.travel_notes ?? [] },
+      calendar: calendarRun.result,
     }), { confidence: 0.85 })
     if (composerRun.ok) {
       composed = composerRun.result
@@ -458,7 +462,7 @@ async function main() {
   // Assemble + persist
   const itinerary = assembleItinerary({
     tripId, brief, timezone, discovery, composed,
-    contextResult: contextRun.result, calendarResult: calendarRun.result,
+    contextResult: contextRun.result, calendarResult: calendarRun.result, notionResult: notionRun.result,
     themeName, posterResult,
   })
 
