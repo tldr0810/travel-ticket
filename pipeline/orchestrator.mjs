@@ -108,9 +108,12 @@ const log = (msg) => console.error(`[orchestrator] ${msg}`)
 async function main() {
   const { plan, designOptions } = await planTrip(sentence, { mock, backend: backendFlag, log })
 
-  const designFlag = args.find((a) => a.startsWith('--design='))?.split('=').slice(1).join('=')
+  // Flag PRESENCE (not truthiness) decides the branch: a bare `--design=` must
+  // resolve via parseDesignChoice's fallback, never fall through to the menu.
+  const designArg = args.find((a) => a.startsWith('--design='))
+  const designFlag = designArg?.split('=').slice(1).join('=')
   let choice
-  if (designFlag) {
+  if (designArg !== undefined) {
     choice = parseDesignChoice(designFlag, designOptions)
   } else if (process.stdin.isTTY && !mock) {
     console.error('\n這趟旅程,你想要哪種票面設計?')
@@ -121,13 +124,13 @@ async function main() {
     const n = Number(ans)
     if (n === designOptions.presets.length + 1) {
       const style = (await rl.question('一句話描述你要的風格: ')).trim()
-      choice = style ? { kind: 'custom', style } : { kind: 'preset', name: designOptions.presets[0].name }
+      choice = style ? { kind: 'custom', style } : parseDesignChoice(undefined, designOptions)
     } else {
       choice = { kind: 'preset', name: designOptions.presets[Math.min(Math.max(n || 1, 1), designOptions.presets.length) - 1].name }
     }
     rl.close()
   } else {
-    choice = { kind: 'preset', name: designOptions.presets[0].name }
+    choice = parseDesignChoice(undefined, designOptions)
   }
 
   const { manifest, tripDir } = await renderTicket(plan, choice, { skipRender, log })

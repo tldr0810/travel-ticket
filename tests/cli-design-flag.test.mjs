@@ -16,3 +16,6 @@ test('unknown name → presets[0] (honest default)', () => {
 test('empty/undefined → presets[0]', () => {
   assert.deepEqual(parseDesignChoice(undefined, OPTS), { kind: 'preset', name: 'japan' })
 })
+test('empty string (bare --design=) → presets[0]', () => {
+  assert.deepEqual(parseDesignChoice('', OPTS), { kind: 'preset', name: 'japan' })
+})
