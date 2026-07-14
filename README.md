@@ -124,6 +124,48 @@ MCP server（`pipeline/composio.mjs`），把使用者自己的信箱/日曆/Not
   notion: status=skipped items=0 (2.5s) — Notion check skipped: COMPOSIO_MULTI_EXECUTE_TOOL: 1 out of 1 tools failed
   ```
 
+## Use as an MCP server
+
+`pipeline/mcp-server.mjs`（`npm run mcp`）把整套 pipeline 包成一個 zero-dep
+stdio MCP server，讓 Claude Code / Claude Desktop 之類的 MCP client 直接呼叫，
+不用另外開 studio 網頁或打指令列。
+
+**Prerequisites**
+- Node 22+
+- `ANTHROPIC_API_KEY`（或已登入的 `claude` CLI，走 headless `claude -p` fallback）
+- 選用：`COMPOSIO_API_KEY`，讓 Gmail/Calendar/Notion context agent 生效
+  （沒設也完全能跑，那三個 agent 會誠實回報 `skipped`）
+
+**兩段式呼叫流程**
+1. `plan_trip {"sentence": "..."}` — 跑完 Trip Brief / Discovery / Composer 等
+   agent，回傳 `plan_id`、行程摘要、`design_options`（可選的票券設計清單）。
+2. 把 `design_options` 呈現給使用者，等使用者選一個設計。
+3. `render_ticket {"plan_id": "...", "design": "<選的設計名稱>"}` —
+   （`design` 可以是某個 preset 名稱、`custom:<風格描述>`，或整個省略走推薦選項）
+   渲染出票券網站，回傳 `entry`（`.../dist/trips/<trip_dir>/index.html`）等路徑。
+
+**Client 設定範例**（把路徑換成你自己 clone 這個 repo 的絕對路徑）：
+```json
+{
+  "mcpServers": {
+    "trip-ticket": {
+      "command": "node",
+      "args": ["/Users/zack/Desktop/travel ticket/switzerland-itinerary-package/pipeline/mcp-server.mjs"],
+      "env": { "COMPOSIO_API_KEY": "ck_..." }
+    }
+  }
+}
+```
+（`env.COMPOSIO_API_KEY` 是選用的；`/Users/zack/.../switzerland-itinerary-package/...`
+是本機範例路徑，請換成你自己這份 repo 實際的絕對路徑。）
+
+**注意事項**
+- `plan_trip` 可能跑好幾分鐘（LLM + web search 都在裡面），client 端請不要設太
+  激進的 timeout，也不用等它逾時失敗才重試。
+- 一切都誠實降級：沒有任何 key 時，Gmail/Calendar/Notion 三個 connector agent
+  自動 `skipped`，出票流程照跑；想完全不打 LLM 測試協定，可以用
+  `plan_trip {"sentence": "", "mock": true}`。
+
 ## 部署
 ```bash
 npx wrangler deploy --config wrangler.itinerary.toml
