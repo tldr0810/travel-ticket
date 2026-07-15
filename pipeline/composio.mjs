@@ -1,75 +1,166 @@
-// Zero-dep client for Composio's dynamic-tools MCP server. The ONLY file in the
-// pipeline that speaks the MCP protocol. Never calls COMPOSIO_MANAGE_CONNECTIONS
-// (it side-effect-spawns pending connections) — connection problems surface as
-// tool errors and the caller degrades to skip.
-const MCP_URL = 'https://connect.composio.dev/mcp'
-const DEFAULT_TIMEOUT_MS = 20_000
+// Composio adapter for user-scoped, read-only travel context. This deliberately
+// uses the current SDK's direct execution API rather than the old shared MCP
+// endpoint: every call carries the visitor's stable userId.
+import { Composio } from '@composio/core'
 
-export const composioEnabled = () => Boolean(process.env.COMPOSIO_API_KEY)
-
-export const parseSse = (text) => {
-  const lines = String(text).split('\n').filter((l) => l.startsWith('data: '))
-  if (!lines.length) throw new Error('no SSE data line in MCP response')
-  return JSON.parse(lines.at(-1).slice(6))
+const CONNECTORS = {
+  gmail: {
+    toolkit: 'gmail', authConfigEnv: 'COMPOSIO_GMAIL_AUTH_CONFIG_ID',
+    linkLabel: 'Gmail',
+  },
+  calendar: {
+    toolkit: 'googlecalendar', authConfigEnv: 'COMPOSIO_CALENDAR_AUTH_CONFIG_ID',
+    linkLabel: 'Google Calendar',
+  },
+  notion: {
+    toolkit: 'notion', authConfigEnv: 'COMPOSIO_NOTION_AUTH_CONFIG_ID',
+    linkLabel: 'Notion',
+  },
 }
 
-let idCounter = 1
+export const composioEnabled = () => Boolean(process.env.COMPOSIO_API_KEY)
+export const connectorNames = () => Object.keys(CONNECTORS)
 
-const post = (body, { key, sessionId, timeoutMs, fetchImpl }) => fetchImpl(MCP_URL, {
-  method: 'POST',
-  headers: {
-    'x-consumer-api-key': key,
-    'content-type': 'application/json',
-    accept: 'application/json, text/event-stream',
-    ...(sessionId ? { 'mcp-session-id': sessionId } : {}),
-  },
-  body: JSON.stringify(body),
-  signal: AbortSignal.timeout(timeoutMs),
+const requireVisitorId = (userId) => {
+  if (typeof userId !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(userId)) {
+    throw new Error('visitor_id must be a stable 8-128 character identifier containing only letters, numbers, _ or -')
+  }
+  return userId
+}
+
+const connector = (name) => {
+  if (!CONNECTORS[name]) throw new Error(`unknown connector: ${name}`)
+  return CONNECTORS[name]
+}
+
+export function createComposioClient(apiKey = process.env.COMPOSIO_API_KEY) {
+  if (!apiKey) throw new Error('COMPOSIO_API_KEY not set; connector data cannot be read')
+  // The SDK sends x-api-key for every backend request, including projects where
+  // that header became mandatory in March 2026.
+  return new Composio({ apiKey, host: 'trip-ticket-mcp' })
+}
+
+const configurationRequired = (visitorId, connectorName) => ({
+  visitor_id: visitorId, connector: connectorName, status: 'configuration_required', accounts: [],
+  message: 'COMPOSIO_API_KEY is not configured on this MCP server.',
 })
 
-export async function mcpSession({ timeoutMs = DEFAULT_TIMEOUT_MS, fetchImpl = fetch } = {}) {
-  const key = process.env.COMPOSIO_API_KEY
-  if (!key) throw new Error('COMPOSIO_API_KEY not set')
-  const opts = { key, timeoutMs, fetchImpl }
-  const initRes = await post({
-    jsonrpc: '2.0', id: idCounter++, method: 'initialize',
-    params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'trip-ticket-pipeline', version: '0.1.0' } },
-  }, opts)
-  if (!initRes.ok) {
-    throw new Error(`MCP initialize failed: HTTP ${initRes.status}${initRes.status === 401
-      ? ' — COMPOSIO_API_KEY looks stale; the dashboard is the source of truth, copy the current key from it'
-      : ''}`)
+export async function connectorStatus({ visitorId, connector: connectorName, client }) {
+  const userId = requireVisitorId(visitorId)
+  const config = connector(connectorName)
+  if (!client && !composioEnabled()) return configurationRequired(userId, connectorName)
+  client ??= createComposioClient()
+  const accounts = await client.connectedAccounts.list({
+    userIds: [userId], toolkitSlugs: [config.toolkit], statuses: ['ACTIVE'], limit: 10,
+  })
+  const active = accounts.items ?? []
+  return {
+    visitor_id: userId,
+    connector: connectorName,
+    status: active.length ? 'connected' : 'not_connected',
+    accounts: active.map((account) => ({ id: account.id, alias: account.alias ?? null, status: account.status })),
   }
-  const sessionId = initRes.headers.get('mcp-session-id')
-  if (!sessionId) throw new Error('MCP initialize returned no mcp-session-id header')
-  await post({ jsonrpc: '2.0', method: 'notifications/initialized' }, { ...opts, sessionId })
+}
 
-  const callTool = async (name, args) => {
-    const res = await post({
-      jsonrpc: '2.0', id: idCounter++, method: 'tools/call',
-      params: { name, arguments: args },
-    }, { ...opts, sessionId })
-    if (!res.ok) throw new Error(`MCP tools/call ${name}: HTTP ${res.status}`)
-    const rpc = parseSse(await res.text())
-    if (rpc.error) throw new Error(`MCP tools/call ${name}: ${rpc.error.message}`)
-    const text = rpc.result?.content?.[0]?.text
-    if (text == null) throw new Error(`MCP tools/call ${name}: empty content`)
-    const inner = JSON.parse(text)
-    if (inner.successful === false) throw new Error(`${name}: ${inner.error || 'tool reported failure'}`)
-    return inner.data ?? inner
+export async function createConnectorLink({ visitorId, connector: connectorName, client }) {
+  const userId = requireVisitorId(visitorId)
+  const config = connector(connectorName)
+  if (!client && !composioEnabled()) return configurationRequired(userId, connectorName)
+  client ??= createComposioClient()
+  const authConfigId = process.env[config.authConfigEnv]
+  if (!authConfigId) {
+    return {
+      visitor_id: userId, connector: connectorName, status: 'configuration_required',
+      message: `${config.authConfigEnv} is not configured on this MCP server; the server owner must create a read-only Composio auth config first.`,
+    }
   }
-
-  const execToolkitTool = async (slug, args, { account } = {}) => {
-    const data = await callTool('COMPOSIO_MULTI_EXECUTE_TOOL', {
-      tools: [{ tool_slug: slug, arguments: args, ...(account ? { account } : {}) }],
-      thought: `trip-ticket pipeline: ${slug}`,
-      current_step: slug,
-    })
-    const item = Array.isArray(data?.results) ? data.results[0] : data
-    const payload = item?.response ?? item
-    if (payload?.successful === false || payload?.error) throw new Error(`${slug}: ${payload.error || 'execution failed'}`)
-    return payload?.data ?? payload
+  // Composio-managed OAuth must use link(), not the retired initiate() flow.
+  const request = await client.connectedAccounts.link(userId, authConfigId)
+  return {
+    visitor_id: userId, connector: connectorName, status: 'authorization_required',
+    authorization_url: request.redirectUrl, connection_request_id: request.id,
+    message: `Open authorization_url and approve ${config.linkLabel}; then call connector_status or a fetch tool with the same visitor_id.`,
   }
+}
 
-  return { callTool, execToolkitTool }
+async function requireConnected({ visitorId, connector: connectorName, client }) {
+  const status = await connectorStatus({ visitorId, connector: connectorName, client })
+  if (status.status !== 'connected') return { status, account: null }
+  return { status, account: status.accounts[0] }
+}
+
+async function execute({ client, visitorId, connectedAccountId, tool, arguments: args }) {
+  const result = await client.tools.execute(tool, {
+    userId: visitorId, ...(connectedAccountId ? { connectedAccountId } : {}), arguments: args,
+    // Composio requires pinned toolkit versions for direct execution. The
+    // server deliberately opts into its documented latest-version mode until
+    // owners choose to pin COMPOSIO_TOOLKIT_VERSION_* values.
+    dangerouslySkipVersionCheck: true,
+  })
+  if (result.successful === false) throw new Error(result.error || `${tool} failed`)
+  return result.data ?? result
+}
+
+export async function fetchGmailContext({ visitorId, destination, startDate, endDate, client }) {
+  const connected = await requireConnected({ visitorId, connector: 'gmail', client })
+  if (!connected.account) return { ...connected.status, messages: [], message: 'Gmail is not connected. Call create_connector_link first.' }
+  client ??= createComposioClient()
+  const destWord = String(destination || '').split(/[:,&，、]/)[0].trim()
+  const query = `(booking OR reservation OR confirmation OR itinerary OR e-ticket OR 訂位 OR 訂房 OR 確認) ${destWord} newer_than:180d`
+  const listed = await execute({ client, visitorId, connectedAccountId: connected.account.id, tool: 'GMAIL_FETCH_EMAILS', arguments: { query, max_results: 20, verbose: false, include_payload: false } })
+  const messages = (listed?.messages ?? []).filter((message) => message?.messageId).slice(0, 10)
+  const details = []
+  for (const message of messages) {
+    try {
+      const full = await execute({ client, visitorId, connectedAccountId: connected.account.id, tool: 'GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID', arguments: { message_id: message.messageId, format: 'full' } })
+      details.push({
+        id: message.messageId, subject: full?.subject ?? message.subject ?? '', from: full?.from ?? '', date: full?.date ?? '',
+        text: String(full?.messageText ?? full?.snippet ?? '').slice(0, 4000),
+      })
+    } catch (error) {
+      details.push({ id: message.messageId, error: `Could not fetch this message: ${error.message}` })
+    }
+  }
+  return { ...connected.status, query, trip_window: startDate && endDate ? `${startDate} to ${endDate}` : null, message_count: details.length, messages: details }
+}
+
+export async function fetchCalendarContext({ visitorId, startDate, endDate, client }) {
+  const connected = await requireConnected({ visitorId, connector: 'calendar', client })
+  if (!connected.account) return { ...connected.status, events: [], message: 'Google Calendar is not connected. Call create_connector_link first.' }
+  client ??= createComposioClient()
+  const data = await execute({ client, visitorId, connectedAccountId: connected.account.id, tool: 'GOOGLECALENDAR_EVENTS_LIST', arguments: {
+    calendarId: 'primary', timeMin: `${startDate}T00:00:00Z`, timeMax: `${endDate}T23:59:59Z`, singleEvents: true, orderBy: 'startTime', maxResults: 50,
+  } })
+  const events = (data?.items ?? data?.events ?? []).map((event) => ({
+    title: event.summary ?? '(untitled)', start: event.start?.dateTime ?? event.start?.date ?? '', end: event.end?.dateTime ?? event.end?.date ?? '',
+    all_day: Boolean(event.start?.date && !event.start?.dateTime), location: event.location ?? '', description: event.description ?? '',
+  }))
+  return { ...connected.status, events }
+}
+
+export async function fetchNotionContext({ visitorId, destination, client }) {
+  const connected = await requireConnected({ visitorId, connector: 'notion', client })
+  if (!connected.account) return { ...connected.status, pages: [], message: 'Notion is not connected. Call create_connector_link first.' }
+  client ??= createComposioClient()
+  const query = String(destination || '').split(/[:,&，、]/)[0].trim()
+  const found = await execute({ client, visitorId, connectedAccountId: connected.account.id, tool: 'NOTION_SEARCH_NOTION_PAGE', arguments: { query, page_size: 5, filter_value: 'page' } })
+  const pages = []
+  for (const page of (found?.results ?? []).filter((item) => item?.id).slice(0, 3)) {
+    try {
+      const detail = await execute({ client, visitorId, connectedAccountId: connected.account.id, tool: 'NOTION_GET_PAGE_MARKDOWN', arguments: { page_id: page.id } })
+      pages.push({ id: page.id, title: page.title ?? page.id, markdown: String(detail?.markdown ?? '').slice(0, 6000) })
+    } catch (error) {
+      pages.push({ id: page.id, title: page.title ?? page.id, error: `Could not read this page: ${error.message}` })
+    }
+  }
+  return { ...connected.status, query, pages }
+}
+
+// Compatibility adapter for the non-MCP CLI pipeline. It deliberately requires
+// COMPOSIO_USER_ID: no implicit or shared account is ever selected.
+export async function mcpSession({ userId = process.env.COMPOSIO_USER_ID, client = createComposioClient() } = {}) {
+  const visitorId = requireVisitorId(userId)
+  return {
+    execToolkitTool: (tool, args) => execute({ client, visitorId, tool, arguments: args }),
+  }
 }

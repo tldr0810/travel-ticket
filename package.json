@@ -14,12 +14,13 @@
     "test": "TRIP_NO_LLM=1 node --test 'tests/*.test.mjs'"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.71.0"
+    "@anthropic-ai/sdk": "^0.71.0",
+    "@composio/core": "^0.13.1"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20240729.0",
+    "@cloudflare/workers-types": "^5.20260715.1",
     "typescript": "^5.5.0",
-    "wrangler": "^3.65.0"
+    "wrangler": "^4.111.0"
   },
   "allowScripts": {
     "esbuild@0.17.19": true,

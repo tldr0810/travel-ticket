@@ -5,81 +5,86 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const ITINERARY = {
+  destination: 'Japan: Kyoto', destination_timezone: 'Asia/Tokyo', home_timezone: 'Europe/London',
+  summary: 'Test itinerary', warnings: [], sources: [], actions_suggested: [], alternatives: {},
+  days: [{ date: '2026-11-10', title: 'Kyoto arrival', base: 'Kyoto', items: [{
+    variant: 'both', type: 'sight', title: 'Gion walk', start_utc: '2026-11-10T08:00:00Z', end_utc: '2026-11-10T09:00:00Z', timezone: 'Asia/Tokyo', location: 'Gion', notes: '', sources: [],
+  }] }],
+}
 
-// helper: spawn server, send messages, collect responses by id
 function rpcSession() {
-  const child = spawn('node', [path.join(ROOT, 'pipeline/mcp-server.mjs')], { env: { ...process.env, TRIP_NO_LLM: '1' } })
+  const child = spawn('node', [path.join(ROOT, 'pipeline/mcp-server.mjs')], { env: { ...process.env, COMPOSIO_API_KEY: '' } })
   let buf = ''
   const pending = new Map()
-  child.stdout.on('data', (d) => {
-    buf += d
-    let idx
-    while ((idx = buf.indexOf('\n')) !== -1) {
-      const line = buf.slice(0, idx); buf = buf.slice(idx + 1)
+  child.stdout.on('data', (data) => {
+    buf += data
+    let index
+    while ((index = buf.indexOf('\n')) !== -1) {
+      const line = buf.slice(0, index); buf = buf.slice(index + 1)
       if (!line.trim()) continue
-      const msg = JSON.parse(line)
-      if (msg.id != null && pending.has(msg.id)) { pending.get(msg.id)(msg); pending.delete(msg.id) }
+      const message = JSON.parse(line)
+      if (message.id != null && pending.has(message.id)) { pending.get(message.id)(message); pending.delete(message.id) }
     }
   })
-  const send = (msg) => child.stdin.write(JSON.stringify(msg) + '\n')
-  const request = (msg) => new Promise((resolve) => { pending.set(msg.id, resolve); send(msg) })
+  const send = (message) => child.stdin.write(JSON.stringify(message) + '\n')
+  const request = (message) => new Promise((resolve) => { pending.set(message.id, resolve); send(message) })
   return { child, send, request, kill: () => child.kill() }
 }
 
-test('initialize → tools/list shows plan_trip + render_ticket', async () => {
-  const s = rpcSession()
+async function initialized() {
+  const session = rpcSession()
+  await session.request({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 't', version: '0' } } })
+  session.send({ jsonrpc: '2.0', method: 'notifications/initialized' })
+  return session
+}
+
+test('initialize → tools/list exposes only mechanical MCP tools', async () => {
+  const session = await initialized()
   try {
-    const init = await s.request({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 't', version: '0' } } })
-    assert.equal(init.result.protocolVersion, '2024-11-05')
-    s.send({ jsonrpc: '2.0', method: 'notifications/initialized' })
-    const list = await s.request({ jsonrpc: '2.0', id: 2, method: 'tools/list' })
-    const names = list.result.tools.map((t) => t.name)
-    assert.ok(names.includes('plan_trip'))
-    assert.ok(names.includes('render_ticket'))
-  } finally { s.kill() }
+    const list = await session.request({ jsonrpc: '2.0', id: 2, method: 'tools/list' })
+    const names = list.result.tools.map((tool) => tool.name)
+    for (const name of ['get_itinerary_schema', 'fetch_travel_context', 'create_visitor_id', 'create_connector_link', 'fetch_gmail_context', 'fetch_calendar_context', 'fetch_notion_context', 'render_ticket']) assert.ok(names.includes(name))
+    assert.ok(!names.includes('plan_trip'))
+  } finally { session.kill() }
 })
 
-test('unknown method → -32601', async () => {
-  const s = rpcSession()
+test('schema and timezone tools do not need an LLM or Composio key', async () => {
+  const session = await initialized()
   try {
-    const r = await s.request({ jsonrpc: '2.0', id: 3, method: 'bogus/method' })
-    assert.equal(r.error.code, -32601)
-  } finally { s.kill() }
+    const schema = await session.request({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'get_itinerary_schema', arguments: {} } })
+    const schemaOut = JSON.parse(schema.result.content[0].text)
+    assert.ok(schemaOut.schema.properties.days)
+    const travel = await session.request({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'fetch_travel_context', arguments: { destination: 'Kyoto', destination_timezone: 'Asia/Tokyo', home_timezone: 'Europe/London', start_date: '2026-11-10', end_date: '2026-11-12' } } })
+    const travelOut = JSON.parse(travel.result.content[0].text)
+    assert.equal(travelOut.timezone.destination_timezone, 'Asia/Tokyo')
+  } finally { session.kill() }
 })
 
-test('plan_trip (mock) → render_ticket round-trip', async () => {
-  const s = rpcSession()
+test('render_ticket accepts a client-composed itinerary without a prior plan', async () => {
+  const session = await initialized()
   try {
-    await s.request({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 't', version: '0' } } })
-    s.send({ jsonrpc: '2.0', method: 'notifications/initialized' })
-    const planRes = await s.request({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'plan_trip', arguments: { sentence: '', mock: true } } })
-    const planOut = JSON.parse(planRes.result.content[0].text)
-    assert.ok(planOut.plan_id)
-    assert.ok(planOut.design_options.presets.length >= 1)
-    const renderRes = await s.request({ jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'render_ticket', arguments: { plan_id: planOut.plan_id, design: 'japan' } } })
-    const renderOut = JSON.parse(renderRes.result.content[0].text)
-    assert.equal(renderOut.theme_used.name, 'japan')
-    assert.ok(renderOut.entry.endsWith('index.html'))
-  } finally { s.kill() }
+    const result = await session.request({ jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'render_ticket', arguments: { itinerary: ITINERARY, design: 'japan' } } })
+    const output = JSON.parse(result.result.content[0].text)
+    assert.equal(output.theme_used.name, 'japan')
+    assert.ok(output.entry.endsWith('index.html'))
+    assert.match(output.poster_status, /skipped/)
+  } finally { session.kill() }
 })
 
-test('tools/call with unknown tool name → protocol error -32602 (not isError)', async () => {
-  const s = rpcSession()
+test('tools/call with unknown tool name → protocol error -32602', async () => {
+  const session = await initialized()
   try {
-    await s.request({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 't', version: '0' } } })
-    s.send({ jsonrpc: '2.0', method: 'notifications/initialized' })
-    const r = await s.request({ jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name: 'bogus_tool', arguments: {} } })
-    assert.equal(r.error.code, -32602)
-    assert.equal(r.result, undefined)
-  } finally { s.kill() }
+    const result = await session.request({ jsonrpc: '2.0', id: 6, method: 'tools/call', params: { name: 'bogus_tool', arguments: {} } })
+    assert.equal(result.error.code, -32602)
+  } finally { session.kill() }
 })
 
-test('render_ticket with unknown plan_id → isError', async () => {
-  const s = rpcSession()
+test('render_ticket rejects malformed client itineraries as a tool error', async () => {
+  const session = await initialized()
   try {
-    await s.request({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 't', version: '0' } } })
-    s.send({ jsonrpc: '2.0', method: 'notifications/initialized' })
-    const r = await s.request({ jsonrpc: '2.0', id: 6, method: 'tools/call', params: { name: 'render_ticket', arguments: { plan_id: 'nope' } } })
-    assert.equal(r.result.isError, true)
-  } finally { s.kill() }
+    const result = await session.request({ jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name: 'render_ticket', arguments: { itinerary: { destination: 'Kyoto' } } } })
+    assert.equal(result.result.isError, true)
+    assert.match(result.result.content[0].text, /destination_timezone/)
+  } finally { session.kill() }
 })

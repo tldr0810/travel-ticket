@@ -1,71 +1,163 @@
 #!/usr/bin/env node
-// trip-ticket MCP server — zero-dep stdio transport (newline-delimited JSON-RPC).
-// stdout is protocol-only; all logs go to stderr.
+// Trip Ticket MCP server: mechanical tools only. The connected MCP client's
+// model performs discovery, reasoning, and itinerary composition with its own
+// credentials; this process never invokes an LLM.
 import readline from 'node:readline'
 import fs from 'node:fs'
 import path from 'node:path'
+import crypto from 'node:crypto'
 import { fileURLToPath } from 'node:url'
-import { planTrip, renderTicket, parseDesignChoice } from './trip.mjs'
+import { ITINERARY_SCHEMA, ITINERARY_EXAMPLE, normalizeItinerary } from './itinerary-schema.mjs'
+import { runTimezoneAgent } from './timezone.mjs'
+import { renderItinerary } from './render.mjs'
+import { THEMES, DEFAULT_TOKENS, resolveTheme } from './themes.mjs'
+import { checkTokens, validateOverrides } from './contrast.mjs'
+import { CUSTOM_ALLOWED_KEYS } from './customTheme.mjs'
+import {
+  connectorNames, connectorStatus, createConnectorLink,
+  fetchGmailContext, fetchCalendarContext, fetchNotionContext,
+} from './composio.mjs'
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const plansDir = path.join(packageRoot, '.trip_work', 'plans')
+const tripsDataDir = path.join(packageRoot, 'data', 'trips')
+const dateSchema = { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' }
+const visitorSchema = { type: 'string', pattern: '^[A-Za-z0-9_-]{8,128}$', description: 'Stable visitor identifier returned by create_visitor_id; store it in your own client/session.' }
+
+const connectorInput = {
+  type: 'object', properties: { visitor_id: visitorSchema, connector: { type: 'string', enum: connectorNames() } }, required: ['visitor_id', 'connector'],
+}
+
+const safeMotifs = (motifs) => Object.fromEntries(
+  ['stampText', 'eyebrow'].filter((key) => typeof motifs?.[key] === 'string').map((key) => [key, motifs[key]]),
+)
+
+function resolveDesign(itinerary, design) {
+  if (design == null || design === '') {
+    const name = resolveTheme({ destination: itinerary.destination, destination_timezone: itinerary.destination_timezone })
+    return { theme: name, theme_used: { name, source: 'deterministic destination fallback' } }
+  }
+  if (typeof design === 'string') {
+    if (!THEMES[design]) throw new Error(`unknown preset design: ${design}`)
+    return { theme: design, theme_used: { name: design, source: 'preset' } }
+  }
+  if (typeof design !== 'object' || Array.isArray(design)) throw new Error('design must be a preset name or a custom design object')
+  const tokens = design.tokens
+  if (!tokens || typeof tokens !== 'object' || Array.isArray(tokens) || !Object.keys(tokens).length) throw new Error('custom design.tokens must be a non-empty object')
+  const allowed = validateOverrides(tokens, CUSTOM_ALLOWED_KEYS)
+  if (!allowed.ok) throw new Error(`custom design tokens rejected: ${allowed.problems.join('; ')}`)
+  const contrast = checkTokens({ ...DEFAULT_TOKENS, ...tokens })
+  if (!contrast.pass) throw new Error(`custom design contrast check failed: ${contrast.failures.map((item) => item.label).join('; ')}`)
+  const motifs = safeMotifs(design.motifs)
+  return {
+    theme: 'default', customTokens: tokens, customMotifs: Object.keys(motifs).length ? motifs : null,
+    theme_used: { name: typeof design.name === 'string' ? design.name : 'custom', custom: true, source: 'client-supplied contrast-gated tokens' },
+  }
+}
+
+function renderTicket({ itineraryJson, design }) {
+  const itinerary = normalizeItinerary(itineraryJson)
+  const selected = resolveDesign(itinerary, design)
+  itinerary.theme = selected.theme
+  if (selected.customTokens) itinerary.custom_theme = { name: selected.theme_used.name, tokens: selected.customTokens, motifs: selected.customMotifs ?? {} }
+  const tripDir = `${itinerary.slug}-${itinerary.trip_id.split('_').at(-1).slice(0, 8)}`
+  const outDir = path.join(packageRoot, 'dist', 'trips', tripDir)
+  const manifest = renderItinerary(itinerary, { outDir, customTokens: selected.customTokens, customMotifs: selected.customMotifs })
+  fs.mkdirSync(tripsDataDir, { recursive: true })
+  fs.writeFileSync(path.join(tripsDataDir, `${tripDir}.json`), JSON.stringify(itinerary, null, 2))
+  return {
+    entry: path.join(outDir, 'index.html'), output_dir: outDir, trip_dir: tripDir, pages: manifest.pages.length,
+    theme_used: selected.theme_used,
+    poster_status: 'skipped: MCP render_ticket is renderer-only; no image-generation CLI/API was invoked.',
+  }
+}
 
 const TOOLS = [
   {
     def: {
-      name: 'plan_trip',
-      description: 'Plan a trip from a one-sentence request (runs LLM agents + optional Gmail/Calendar/Notion context; can take several minutes). Returns a plan_id and ticket design options. Call render_ticket next with the plan_id and a chosen design.',
+      name: 'get_itinerary_schema',
+      description: 'Return the final_itinerary JSON Schema and a complete example. Compose the itinerary yourself from the user request and optional context tools, then pass it to render_ticket. This server does not plan trips or call an LLM.',
+      inputSchema: { type: 'object', properties: {} },
+    },
+    handler: async () => ({ schema: ITINERARY_SCHEMA, example: ITINERARY_EXAMPLE, guidance: 'Use UTC ISO timestamps for every item. Supply IANA timezones. Keep uncertain facts as warnings or notes with sources.' }),
+  },
+  {
+    def: {
+      name: 'fetch_travel_context',
+      description: 'Calculate destination/home offsets, DST changes, and body-clock guidance. This is deterministic and does not infer a timezone from a place name or call an LLM.',
       inputSchema: {
-        type: 'object',
-        properties: {
-          sentence: { type: 'string', description: 'One-sentence trip request, e.g. "七月中帶另一半去瑞士五天,不租車"' },
-          mock: { type: 'boolean', description: 'Use canned data, no LLM calls (testing only)' },
-        },
-        required: ['sentence'],
+        type: 'object', properties: {
+          destination: { type: 'string' }, destination_timezone: { type: 'string', description: 'IANA timezone required, e.g. Asia/Tokyo.' },
+          home_timezone: { type: 'string', description: 'IANA timezone required, e.g. Europe/London.' }, start_date: dateSchema, end_date: dateSchema,
+        }, required: ['destination', 'destination_timezone', 'home_timezone', 'start_date', 'end_date'],
       },
     },
-    handler: async ({ sentence, mock = false }) => {
-      const { plan, designOptions } = await planTrip(sentence, { mock, log: (m) => console.error(`[plan_trip] ${m}`) })
-      fs.mkdirSync(plansDir, { recursive: true })
-      fs.writeFileSync(path.join(plansDir, `${plan.tripId}.json`), JSON.stringify({ plan, designOptions }))
-      return {
-        plan_id: plan.tripId,
-        destination: plan.brief.destination,
-        dates: `${plan.brief.start_date} → ${plan.brief.end_date}`,
-        summary: plan.composed.summary,
-        design_options: designOptions,
-        next_step: `Ask the user which design they want, then call render_ticket with plan_id and design (a preset name, or "custom:<their description>").`,
-      }
+    handler: async (args) => ({ destination: args.destination, dates: `${args.start_date} to ${args.end_date}`, timezone: runTimezoneAgent(args) }),
+  },
+  {
+    def: {
+      name: 'create_visitor_id',
+      description: 'Create a random stable visitor identifier for Composio connections. Save and reuse it in your own MCP client/session; the server cannot read client cookies over stdio.',
+      inputSchema: { type: 'object', properties: {} },
     },
+    handler: async () => ({ visitor_id: `tt_${crypto.randomUUID().replace(/-/g, '')}`, message: 'Store this value and use the same visitor_id for every connector tool.' }),
+  },
+  {
+    def: {
+      name: 'create_connector_link',
+      description: 'Create a Composio OAuth Connect Link for this visitor and one connector. Open authorization_url in a browser, approve the provider consent screen, then reuse the same visitor_id when fetching context. No shared account fallback exists.',
+      inputSchema: connectorInput,
+    },
+    handler: async ({ visitor_id: visitorId, connector }) => createConnectorLink({ visitorId, connector }),
+  },
+  {
+    def: {
+      name: 'get_connector_status',
+      description: 'Report whether this visitor has an active private Composio connection for Gmail, Google Calendar, or Notion.',
+      inputSchema: connectorInput,
+    },
+    handler: async ({ visitor_id: visitorId, connector }) => connectorStatus({ visitorId, connector }),
+  },
+  {
+    def: {
+      name: 'fetch_gmail_context',
+      description: 'Return booking-looking Gmail messages for this visitor as raw source data. It never summarizes or infers bookings with an LLM; Gmail must be connected first.',
+      inputSchema: { type: 'object', properties: { visitor_id: visitorSchema, destination: { type: 'string' }, start_date: dateSchema, end_date: dateSchema }, required: ['visitor_id', 'destination', 'start_date', 'end_date'] },
+    },
+    handler: async ({ visitor_id: visitorId, destination, start_date: startDate, end_date: endDate }) => fetchGmailContext({ visitorId, destination, startDate, endDate }),
+  },
+  {
+    def: {
+      name: 'fetch_calendar_context',
+      description: 'Return this visitor\'s Google Calendar events within the requested UTC date window as raw source data; Calendar must be connected first.',
+      inputSchema: { type: 'object', properties: { visitor_id: visitorSchema, start_date: dateSchema, end_date: dateSchema }, required: ['visitor_id', 'start_date', 'end_date'] },
+    },
+    handler: async ({ visitor_id: visitorId, start_date: startDate, end_date: endDate }) => fetchCalendarContext({ visitorId, startDate, endDate }),
+  },
+  {
+    def: {
+      name: 'fetch_notion_context',
+      description: 'Search and return up to three Notion pages for this visitor as raw markdown source data. It never uses an LLM to extract or summarize; Notion must be connected first.',
+      inputSchema: { type: 'object', properties: { visitor_id: visitorSchema, destination: { type: 'string' } }, required: ['visitor_id', 'destination'] },
+    },
+    handler: async ({ visitor_id: visitorId, destination }) => fetchNotionContext({ visitorId, destination }),
   },
   {
     def: {
       name: 'render_ticket',
-      description: 'Render the ticket site for a planned trip. design = a preset name from plan_trip\'s design_options, or "custom:<style description>" (contrast-gated; falls back honestly), or omit for the top recommendation.',
+      description: 'Render a client-composed final_itinerary into a static ticket site. This is pure rendering: no planner, web search, LLM, or image-generation call runs here. design is a registered preset name or contrast-gated client-supplied tokens/motifs.',
       inputSchema: {
-        type: 'object',
-        properties: {
-          plan_id: { type: 'string' },
-          design: { type: 'string' },
-        },
-        required: ['plan_id'],
+        type: 'object', properties: {
+          itinerary: ITINERARY_SCHEMA,
+          design: {
+            oneOf: [
+              { type: 'string', enum: Object.keys(THEMES) },
+              { type: 'object', properties: { name: { type: 'string' }, tokens: { type: 'object', additionalProperties: { type: 'string' } }, motifs: { type: 'object', properties: { stampText: { type: 'string' }, eyebrow: { type: 'string' } } } }, required: ['tokens'] },
+            ],
+          },
+        }, required: ['itinerary'],
       },
     },
-    handler: async ({ plan_id, design }) => {
-      const file = path.join(plansDir, `${path.basename(plan_id)}.json`)
-      if (!fs.existsSync(file)) throw new Error(`unknown plan_id: ${plan_id} — call plan_trip first`)
-      const { plan, designOptions } = JSON.parse(fs.readFileSync(file, 'utf8'))
-      const choice = parseDesignChoice(design, designOptions)
-      const outDir = path.join(packageRoot, 'dist', 'trips')
-      const { manifest, tripDir, themeUsed } = await renderTicket(plan, choice, { log: (m) => console.error(`[render_ticket] ${m}`) })
-      return {
-        output_dir: path.join(outDir, tripDir),
-        entry: path.join(outDir, tripDir, 'index.html'),
-        theme_used: themeUsed,
-        trip_dir: tripDir,
-        pages: manifest.pages?.length ?? 0,
-      }
-    },
+    handler: async ({ itinerary, design }) => renderTicket({ itineraryJson: itinerary, design }),
   },
 ]
 
@@ -74,14 +166,10 @@ const reply = (id, result) => write({ jsonrpc: '2.0', id, result })
 const replyError = (id, code, message) => write({ jsonrpc: '2.0', id, error: { code, message } })
 
 const handlers = {
-  initialize: (params) => ({
-    protocolVersion: '2024-11-05',
-    capabilities: { tools: {} },
-    serverInfo: { name: 'trip-ticket', version: '0.1.0' },
-  }),
-  'tools/list': () => ({ tools: TOOLS.map((t) => t.def) }),
+  initialize: () => ({ protocolVersion: '2025-11-25', capabilities: { tools: {} }, serverInfo: { name: 'trip-ticket', version: '0.2.0' } }),
+  'tools/list': () => ({ tools: TOOLS.map((tool) => tool.def) }),
   'tools/call': async (params) => {
-    const tool = TOOLS.find((t) => t.def.name === params?.name)
+    const tool = TOOLS.find((item) => item.def.name === params?.name)
     if (!tool) throw Object.assign(new Error(`unknown tool: ${params?.name}`), { code: -32602 })
     try {
       const result = await tool.handler(params?.arguments ?? {})
@@ -97,13 +185,9 @@ rl.on('line', async (line) => {
   if (!line.trim()) return
   let msg
   try { msg = JSON.parse(line) } catch { return replyError(null, -32700, 'parse error') }
-  if (msg.method?.startsWith('notifications/')) return // no response to notifications
+  if (msg.method?.startsWith('notifications/')) return
   const handler = handlers[msg.method]
   if (!handler) return replyError(msg.id ?? null, -32601, `method not found: ${msg.method}`)
-  try {
-    reply(msg.id, await handler(msg.params))
-  } catch (error) {
-    replyError(msg.id ?? null, error.code ?? -32603, error.message)
-  }
+  try { reply(msg.id, await handler(msg.params)) } catch (error) { replyError(msg.id ?? null, error.code ?? -32603, error.message) }
 })
 process.stdin.on('end', () => process.exit(0))
