@@ -3,8 +3,13 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { customTokensFrom } from '../pipeline/trip.mjs'
+import { customMotifsFrom, customTokensFrom } from '../pipeline/trip.mjs'
 import { renderItinerary } from '../pipeline/render.mjs'
+
+const renderedHtml = (dir) => fs.readdirSync(dir)
+  .filter((file) => file.endsWith('.html'))
+  .map((file) => fs.readFileSync(path.join(dir, file), 'utf8'))
+  .join('\n')
 
 const GOOD_TOKENS = { // japan's palette: known to pass all 13 pairs (tests/custom-theme.test.mjs)
   rail: '#0b7d6e', 'rail-deep': '#0a5648', 'rail-press': '#0a5648', stamp: '#a62812',
@@ -15,9 +20,13 @@ const GOOD_TOKENS = { // japan's palette: known to pass all 13 pairs (tests/cust
 const MIN_ITIN = {
   artifact_type: 'final_itinerary', trip_id: 'trip_test_abcd', destination: 'Testland',
   slug: 'testland-2026', destination_timezone: 'UTC', home_timezone: 'UTC',
-  travellers: 1, summary: 's', warnings: [], sources: [], days: [], alternatives: {},
+  travellers: 1, summary: 's', warnings: [], sources: [], alternatives: {},
   actions_suggested: [], cover: { title_top: 'Test', title_accent: 'Trip' },
   context: { bookings: [], calendar_events: [] },
+  days: [{
+    date: '2026-01-01', title: 'Test → Testland', base: 'Testland',
+    items: [{ variant: 'both', type: 'visit', title: 'Test stop', start_utc: '2026-01-01T10:00:00Z', end_utc: '2026-01-01T11:00:00Z', location: 'Testland', notes: '', sources: [] }],
+  }],
 }
 
 test('customTokensFrom returns the tokens for a valid custom_theme', () => {
@@ -40,11 +49,19 @@ test('customTokensFrom returns null when custom_theme is absent', () => {
   assert.equal(customTokensFrom(MIN_ITIN), null)
 })
 
-test('end-to-end: renderItinerary with customTokensFrom(itin) output contains --rail:', () => {
-  const itin = { ...MIN_ITIN, custom_theme: { name: 'kyoto-teal', tokens: GOOD_TOKENS } }
+test('customMotifsFrom preserves only supported string motifs', () => {
+  const itin = { ...MIN_ITIN, custom_theme: { motifs: { stampText: '済', eyebrow: '記念', ignored: 'no', bad: 1 } } }
+  assert.deepEqual(customMotifsFrom(itin), { stampText: '済', eyebrow: '記念' })
+})
+
+test('end-to-end: renderItinerary restores custom tokens and motifs from a saved itinerary', () => {
+  const itin = { ...MIN_ITIN, custom_theme: { name: 'kyoto-teal', tokens: GOOD_TOKENS, motifs: { stampText: '済', eyebrow: '記念切符' } } }
   const tokens = customTokensFrom(itin)
+  const motifs = customMotifsFrom(itin)
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'render-only-'))
-  renderItinerary(itin, { outDir: dir, customTokens: tokens })
-  const html = fs.readFileSync(path.join(dir, 'index.html'), 'utf8')
+  renderItinerary(itin, { outDir: dir, customTokens: tokens, customMotifs: motifs })
+  const html = renderedHtml(dir)
   assert.ok(html.includes('--rail:'))
+  assert.ok(html.includes('記念切符'))
+  assert.ok(html.includes('済'))
 })

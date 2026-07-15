@@ -21,7 +21,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import readline from 'node:readline/promises'
 import { fileURLToPath } from 'node:url'
-import { planTrip, renderTicket, parseDesignChoice, tripDirName, tripsDataDir, saveTripJson, customTokensFrom } from './trip.mjs'
+import { planTrip, renderTicket, parseDesignChoice, tripDirName, tripsDataDir, saveTripJson, customTokensFrom, customMotifsFrom } from './trip.mjs'
 import { renderItinerary } from './render.mjs'
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -78,8 +78,9 @@ if (renderOnly) {
     const itinerary = JSON.parse(fs.readFileSync(path.join(tripsDataDir, match), 'utf8'))
     const dir = tripDirName(itinerary)
     const customTokens = customTokensFrom(itinerary)
+    const customMotifs = customMotifsFrom(itinerary)
     if (itinerary.custom_theme?.tokens && !customTokens) console.error('[orchestrator] custom_theme.tokens failed validation — rendering without custom overrides')
-    const manifest = renderItinerary(itinerary, { outDir: path.join(packageRoot, 'dist', 'trips', dir), ...(customTokens ? { customTokens } : {}) })
+    const manifest = renderItinerary(itinerary, { outDir: path.join(packageRoot, 'dist', 'trips', dir), ...(customTokens ? { customTokens } : {}), ...(customMotifs ? { customMotifs } : {}) })
     console.log(JSON.stringify({ ...manifest, trip_dir: dir }, null, 2))
     process.exit(0)
   }
@@ -92,9 +93,10 @@ if (renderOnly) {
   saveTripJson(itinerary) // 自我遷移：舊資料第一次重印時進票夾
   const dir = tripDirName(itinerary)
   const customTokens = customTokensFrom(itinerary)
+  const customMotifs = customMotifsFrom(itinerary)
   if (itinerary.custom_theme?.tokens && !customTokens) console.error('[orchestrator] custom_theme.tokens failed validation — rendering without custom overrides')
-  const manifest = renderItinerary(itinerary, { outDir: path.join(packageRoot, 'dist'), ...(customTokens ? { customTokens } : {}) })
-  renderItinerary(itinerary, { outDir: path.join(packageRoot, 'dist', 'trips', dir), ...(customTokens ? { customTokens } : {}) })
+  const manifest = renderItinerary(itinerary, { outDir: path.join(packageRoot, 'dist'), ...(customTokens ? { customTokens } : {}), ...(customMotifs ? { customMotifs } : {}) })
+  renderItinerary(itinerary, { outDir: path.join(packageRoot, 'dist', 'trips', dir), ...(customTokens ? { customTokens } : {}), ...(customMotifs ? { customMotifs } : {}) })
   console.log(JSON.stringify({ ...manifest, trip_dir: dir }, null, 2))
   process.exit(0)
 }

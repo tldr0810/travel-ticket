@@ -1244,7 +1244,7 @@ const barcodeStyle = (seed) => {
   return `background-image:linear-gradient(90deg,${stops.join(',')});background-size:${x}px 100%`
 }
 
-export function renderItinerary(itinerary, { outDir, customTokens }) {
+export function renderItinerary(itinerary, { outDir, customTokens, customMotifs }) {
   const tripId = itinerary.trip_id || 'trip_unknown'
   const shortId = tripId.split('_').at(-1).slice(0, 4)
   const dtz = itinerary.destination_timezone || 'UTC'
@@ -1253,7 +1253,15 @@ export function renderItinerary(itinerary, { outDir, customTokens }) {
   const cover = itinerary.cover || {}
   // theme 只讀欄位、不推斷（舊 JSON 一律 default——回歸鐵律）。
   const themeName = THEMES[itinerary.theme] ? itinerary.theme : 'default'
-  const themeMotifs = THEMES[themeName].motifs || {}
+  const registeredMotifs = THEMES[themeName].motifs || {}
+  const themeMotifs = {
+    ...registeredMotifs,
+    ...Object.fromEntries(
+      ['stampText', 'eyebrow']
+        .filter((key) => typeof customMotifs?.[key] === 'string')
+        .map((key) => [key, customMotifs[key]]),
+    ),
+  }
   // Trust boundary: customTokens values are interpolated UNESCAPED into raw CSS
   // below. Callers MUST already have run them through the customTheme gate
   // (pipeline/customTheme.mjs) or customTokensFrom (pipeline/trip.mjs) — both
@@ -1282,6 +1290,9 @@ export function renderItinerary(itinerary, { outDir, customTokens }) {
   // PWA app names (installed handbook), derived from the cover title.
   const { name: appName, short: appShort } = pwaNames(itinerary, { destinationTop, destinationAccent })
   const eyebrow = cover.eyebrow || themeMotifs.eyebrow || 'Ticket stack · UTC-first preview'
+  // stampJs below is a generated script: escape for SVG text first, then emit
+  // the escaped value as a JSON JS string literal so it cannot break either.
+  const stampTextJs = JSON.stringify(esc(themeMotifs.stampText || 'VISITED'))
   const travellers = cover.travellers ?? itinerary.travellers ?? '—'
 
   // Calendar dates are formatted in UTC on a noon anchor so the weekday/date
@@ -1388,7 +1399,7 @@ export function renderItinerary(itinerary, { outDir, customTokens }) {
   const svg = (iso) => { const t = fmt(iso); return '<svg class="postmark" viewBox="0 0 120 120" aria-hidden="true">'
     + '<circle cx="60" cy="60" r="54" fill="none" stroke="currentColor" stroke-width="3"/>'
     + '<circle cx="60" cy="60" r="44" fill="none" stroke="currentColor" stroke-width="1.5"/>'
-    + '<text class="pm-head" x="60" y="48" text-anchor="middle">${themeMotifs.stampText || 'VISITED'}</text>'
+    + '<text class="pm-head" x="60" y="48" text-anchor="middle">' + ${stampTextJs} + '</text>'
     + '<text class="pm-time" x="60" y="68" text-anchor="middle">' + t.hm + '</text>'
     + '<text class="pm-date" x="60" y="84" text-anchor="middle">' + t.md + '</text></svg>'; };
   // 計數只算「目前模式可見」的章，跟 Stops 的口徑一致；setMode 切換時會重算。

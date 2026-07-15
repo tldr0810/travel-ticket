@@ -51,6 +51,19 @@ export function customTokensFrom(itinerary) {
   return validateOverrides(tokens, CUSTOM_ALLOWED_KEYS).ok ? tokens : null
 }
 
+// customMotifsFrom — preserves only the two string motifs a saved custom
+// theme may carry. The renderer escapes these values at both output boundaries.
+export function customMotifsFrom(itinerary) {
+  const motifs = itinerary?.custom_theme?.motifs
+  if (!motifs || typeof motifs !== 'object' || Array.isArray(motifs)) return null
+  const safe = Object.fromEntries(
+    ['stampText', 'eyebrow']
+      .filter((key) => typeof motifs[key] === 'string')
+      .map((key) => [key, motifs[key]]),
+  )
+  return Object.keys(safe).length ? safe : null
+}
+
 // ---------------------------------------------------------------------------
 // Agent supervision: every agent runs under a timeout and reports a status
 // entry regardless of outcome. Statuses are per-run: makeSupervisor closes
@@ -420,6 +433,7 @@ export async function renderTicket(plan, choice, { skipRender = false, log = con
 
   let themeName = resolveTheme({ destination_timezone: plan.brief.destination_timezone, destination: plan.brief.destination })
   let customTokens = null
+  let customMotifs = null
   let themeUsed = { name: themeName }
   if (choice?.kind === 'preset' && THEMES[choice.name]) {
     themeName = choice.name
@@ -435,10 +449,8 @@ export async function renderTicket(plan, choice, { skipRender = false, log = con
     }
     if (result.ok) {
       customTokens = result.tokens
+      customMotifs = customMotifsFrom({ custom_theme: { motifs: result.motifs } })
       themeName = 'default' // registered base; custom tokens override at render time
-      // result.motifs (stampText/eyebrow) is deliberately unused here — wiring it would
-      // interpolate raw LLM output into rendered SVG/HTML. See DEVIATION note in
-      // .superpowers/sdd/progress.md; deferred pending an escaped render path.
       themeUsed = { name: result.name, custom: true, rationale: result.rationale }
     } else {
       themeName = fallbackName
@@ -472,7 +484,7 @@ export async function renderTicket(plan, choice, { skipRender = false, log = con
   })
   if (themeUsed.custom) {
     // Recorded in the JSON so a --render-only re-print reproduces the custom look.
-    itinerary.custom_theme = { name: themeUsed.name, rationale: themeUsed.rationale, tokens: customTokens }
+    itinerary.custom_theme = { name: themeUsed.name, rationale: themeUsed.rationale, tokens: customTokens, motifs: customMotifs ?? {} }
   }
 
   fs.mkdirSync(path.join(packageRoot, '.trip_work'), { recursive: true })
@@ -484,8 +496,8 @@ export async function renderTicket(plan, choice, { skipRender = false, log = con
 
   let manifest = { artifact_type: 'final_itinerary', trip_id: plan.tripId, preview_status: 'not_rendered' }
   if (!skipRender) {
-    manifest = renderItinerary(itinerary, { outDir: path.join(packageRoot, 'dist'), customTokens })
-    renderItinerary(itinerary, { outDir: path.join(packageRoot, 'dist', 'trips', tripDirName(itinerary)), customTokens })
+    manifest = renderItinerary(itinerary, { outDir: path.join(packageRoot, 'dist'), customTokens, customMotifs })
+    renderItinerary(itinerary, { outDir: path.join(packageRoot, 'dist', 'trips', tripDirName(itinerary)), customTokens, customMotifs })
     log(`rendered ${manifest.pages.length} pages to dist/ (+ trips/${tripDirName(itinerary)})`)
   }
 
