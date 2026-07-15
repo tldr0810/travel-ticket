@@ -5,10 +5,34 @@ Task C3: complete (commits dd326f9..5c386ef, review approved)
   Note: GMAIL_FETCH_EMAILS args live-verified by controller pre-plan; messageText response field verified at C6 smoke.
 Task C4: complete (commits 5c386ef..7980320, review approved)
   Minor (deferred): no explicit empty-events test; events[0].all_day===false unasserted.
-Task C5: complete (Notion agent + orchestrator wiring; see .superpowers/sdd/task-5-report.md)
   Deviation: array field named travel_notes (not notes[] per spec §5.3) — notes is the string status field every agent uses.
   Note: NOTION_SEARCH_NOTION_PAGE/NOTION_GET_PAGE_MARKDOWN arg names live-verified pre-plan; response field names (results[].id/.title, markdown) unverified live — Notion has no active Composio connection yet, so today's live behavior is an honest skip.
 Task C5: complete (commits 7980320..cefb06d, review approved)
   Minor (deferred): notion llm-retry + one-bad-page paths untested; skipped-test doesn't assert notes/empty; all-pages-unreadable reports ok not skipped (plan-inherited); empty destWord edge.
 Task C6: complete (smoke script + README setup docs; see .superpowers/sdd/task-6-report.md)
   Live smoke ran clean with real COMPOSIO_API_KEY + claude CLI backend: gmail ok/0, calendar ok/1 (real event, mapping verified correct), notion skipped (no active connection) — no field-shape mismatches found, no agent code changes needed.
+Task C6: complete (commits cefb06d..49acf85, review approved) — LIVE SMOKE PASSED: gmail ok/0, calendar ok/1, notion skipped. Composio plan DONE.
+Task D1: complete (commits 49acf85..8cceb85, review approved) — CI script output byte-identical.
+Task D2: complete (commit 989d004, review pending)
+Task D2: review approved.
+Task D3: complete (commit a8b52ff, review pending)
+Task D3: review approved. Minor deferred: add trust-boundary comment at customCss build (values pre-validated by D4 gate).
+Task D4: complete (commit d34a96a, review pending)
+Task D4: review approved WITH Important finding (plan-inherited): null/undefined llm result → TypeError rejection violates never-throws. Fix dispatched. Minors deferred: readFileSync unguarded; duplicated ok:true literal; conflated failure kinds in gate(); CUSTOM_ALLOWED_KEYS contents unasserted.
+Task D5: complete (commit c014233, review pending). Adaptations: assembleItinerary +sentence/agentStatuses params; planTrip throws (main catches → exit 1).
+Task D5: review approved (opus, move-fidelity verified verbatim). Minors deferred: --render-only doesn't re-apply custom_theme.tokens (comment overstates); plan.mock field undocumented; custom-success poster uses default theme name.
+Task D4-fix: commit 9de1cba (re-review pending)
+Task D4-fix: re-review APPROVED (never-throws verified branch-by-branch).
+Task D6: complete (commit 86495dd, review pending)
+Task D6: review approved WITH Important (brief-inherited): empty --design= bypasses fallback into menu. Fix dispatched. Minors deferred: duplicated fallback shape x3; data/final_itinerary.json churn noise; weak japan-override verification.
+Task M1+M2: complete (commit 942b473, review pending). Flag: data/trips/ not gitignored (test artifacts).
+Task M1+M2: review approved (opus). Plan-inconsistency resolved by controller: unknown tool → -32602 JSON-RPC error is CORRECT (standard MCP); constraint bullet was the mistake. Final review to sanity-check. Minors deferred: no unknown-tool test; data/trips gitignore; id-less request edge.
+Task D6-fix: commit a9a2a49 (re-review pending)
+Task D6-fix: re-review APPROVED.
+Task M3: complete (commit 477f71d) — manual MCP smoke passed end-to-end (plan_trip→render_ticket→index.html on disk).
+ALL TASKS COMPLETE. Final whole-branch review next.
+FINAL REVIEW (Fable 5): READY AFTER FIXES. 6-item fix list dispatched to single fixer.
+  Important: (1) --render-only drops custom_theme.tokens; (2) customTheme ok:true on token-less output; (3) custom motifs generated-but-dropped = unlogged spec drift (deliberate: raw SVG interpolation injection surface — log deviation, don't wire).
+  Minor-must-fix: data/trips gitignore; trust-boundary comment; unknown-tool -32602 test (ruling confirmed correct per MCP spec).
+DEVIATION (spec §4.4 ticket-design spec): custom-theme motifs (stampText/eyebrow) are generated and returned by generateCustomTheme but intentionally NOT applied at render time — wiring them would interpolate LLM output raw into SVG/HTML (render.mjs ~line 1386, injection surface); deferred pending an escaped render path.
+FINAL FIX: commit 9cd0e10, all 6 items verified by final reviewer → VERDICT: DONE. Branch ready. 57/57 tests.
