@@ -31,7 +31,8 @@
 ## 設計精華（細節看 spec，這裡只是地圖）
 
 - 全 Cloudflare：Worker（頁面+API）+ **Workflows**（pipeline ~6 分鐘，每 agent
-  一個 step）+ R2（行程 JSON + 渲染站）+ KV（進度）。
+  一個 step）+ **KV-only**（`TRIPS_KV` 進度、`TRIPS_SITES` 行程 JSON+渲染站，
+  見下方更正——R2 需要信用卡，Zack 不想加，改用免卡的 KV 扛兩者）。
 - 使用者流程：貼一句話（+Turnstile）→ **必經的連結帳號頁**（Gmail/Calendar/
   Notion 卡片，可明確跳過，文案強調連了更 customised）→ 進度頁輪詢 →
   `/trips/<slug-id>/` 網址即憑證（無登入、不收 email）。
@@ -49,8 +50,11 @@
 
 ## Zack 要親手做的事（你做不了，卡住就開口要）
 
-- [ ] `npx wrangler login`（2026-07-21 檢查過：**未登入**，舊 demo 的登入已失效）
-      或給 Cloudflare API token（Workers + R2 + KV + Workflows 權限）
+- [x] ~~`npx wrangler login` 或給 Cloudflare API token~~（2026-07-21：確認
+      `CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ACCOUNT_ID` 已在環境變數可用，實測
+      `wrangler kv namespace create` 成功建立 `TRIPS_KV`/`TRIPS_SITES` 兩個
+      namespace 並寫進 `wrangler.itinerary.toml`——**不需要 R2 權限**，
+      儲存層已改 KV-only，見上方更正）
 - [x] ~~核准 consent URL~~（2026-07-21 已核准 `agents:edit`/`agents:read`/`a2a:edit`/`a2a:read`）
 - [x] ~~建立 `AGENT_PIPELINE` agent~~（2026-07-21 已建立：
       `agt_agpyj7n5wr4r3h3euvlbrqehpy`，已填進 `wrangler.itinerary.toml`）
