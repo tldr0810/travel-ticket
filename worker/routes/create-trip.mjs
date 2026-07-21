@@ -48,6 +48,21 @@ function makeTripId(todayIso) {
 }
 
 export async function handleCreateTrip(request, env) {
+  const remoteip = request.headers.get('cf-connecting-ip') ?? undefined
+
+  // Cloudflare's native Workers Rate Limiting binding (per-IP) — a second,
+  // cheaper gate ahead of Turnstile's own network round-trip: each trip
+  // triggers 5-8 minutes of billed LLM/agent work, so a high-frequency
+  // requester (even one that passes Turnstile) shouldn't be able to hammer
+  // this endpoint. Binding is optional so local/test envs without it degrade
+  // to "not rate limited" rather than crashing.
+  if (env.TRIPS_RATE_LIMITER) {
+    const { success } = await env.TRIPS_RATE_LIMITER.limit({ key: remoteip ?? 'unknown' })
+    if (!success) {
+      return jsonResponse({ error: 'too many requests — please wait a minute and try again.' }, 429)
+    }
+  }
+
   let body
   try {
     body = await request.json()
@@ -57,7 +72,6 @@ export async function handleCreateTrip(request, env) {
 
   const { sentence, visitor_id: visitorId, turnstile_token: turnstileToken, design } = body ?? {}
 
-  const remoteip = request.headers.get('cf-connecting-ip') ?? undefined
   const verified = await verifyTurnstile(env, turnstileToken, remoteip)
   if (!verified) {
     return jsonResponse({ error: 'Turnstile verification failed — please retry the challenge.' }, 403)

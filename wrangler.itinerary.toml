@@ -33,6 +33,19 @@ id = "2be9bec372104cd5a9f09fb2af19f563"
 binding = "TRIPS_SITES"
 id = "8a0dd77046394540b7ef9e7f3f25d0e7"
 
+# Per-IP rate limit on POST /api/trips (worker/routes/create-trip.mjs) — a
+# second, cheaper gate ahead of Turnstile: each trip triggers 5-8 minutes of
+# billed LLM/agent work, so even a Turnstile-passing high-frequency requester
+# shouldn't be able to hammer this endpoint. Native Workers binding (GA), no
+# custom domain/zone required (this Worker only has a workers.dev hostname,
+# so the dashboard-level WAF "Rate limiting rules" feature doesn't apply here).
+[[ratelimits]]
+name = "TRIPS_RATE_LIMITER"
+namespace_id = "1001"
+[ratelimits.simple]
+limit = 5
+period = 60
+
 # TripPipelineWorkflow (Task 6): brief → timezone → discovery/gmail/calendar/
 # notion → composer → custom_theme → render → manifest.
 [[workflows]]

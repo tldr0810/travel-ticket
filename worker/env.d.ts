@@ -21,6 +21,11 @@ export interface Env {
   // server-side-only, checked by worker/routes/create-trip.mjs.
   TURNSTILE_SITE_KEY?: string
   TURNSTILE_SECRET_KEY?: string
+
+  // Cloudflare native Workers Rate Limiting binding (GA) — per-IP gate on
+  // POST /api/trips (worker/routes/create-trip.mjs). Optional so local/test
+  // envs without the binding degrade to "not rate limited" rather than crash.
+  TRIPS_RATE_LIMITER?: RateLimit
 }
 
 export interface TripWorkflowParams {
