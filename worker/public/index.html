@@ -1,8 +1,126 @@
 <!doctype html>
-<html lang="en">
-<head><meta charset="utf-8"><title>Trip Ticket</title></head>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trip Ticket</title>
+<meta name="description" content="一句話出一疊車票：貼上旅程描述，multi-agent pipeline 排出逐日行程，印成車票風格的旅遊手冊。">
+<meta name="theme-color" content="#efe0c3">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="/ticket.css">
+</head>
 <body>
-<!-- Placeholder — Task 10 replaces this with the real home/connect/progress pages. -->
-<p>Trip Ticket is being set up. Check back soon.</p>
+<main class="page">
+  <div class="ticket-stack">
+    <section class="ticket">
+      <div class="ticket-grid">
+        <div class="main">
+          <div class="eyebrow">Trip Ticket · Multi-Agent Pipeline</div>
+          <h1>一句話<br><span>出一疊車票</span></h1>
+          <p class="hint">把想去的旅程用一句話描述——目的地、大概日期、幾個人、步調偏好——剩下交給 agents：解析需求、查時差、上網做在地功課、排成逐日行程，最後印成車票風格的手冊。</p>
+          <label for="sentence" class="sr-only">用一句話描述你的旅程</label>
+          <textarea id="sentence" name="sentence" placeholder="例：十月中帶另一半從台北去京都四天，賞楓吃和食，步調放鬆不趕行程，搭大眾運輸"></textarea>
+          <div id="turnstile-container" style="margin-top:16px"></div>
+          <p class="notice" id="config-notice" hidden>Turnstile 尚未設定完成，出票請求目前會被伺服器拒絕——請稍後再試。</p>
+          <div class="controls">
+            <button type="button" class="cta" id="punch">出票 · Punch It</button>
+          </div>
+          <p class="sr-only" id="announce" role="status" aria-live="polite"></p>
+          <p class="hint" id="error" style="color:var(--gold)" role="alert"></p>
+        </div>
+        <aside class="stub">
+          <div class="stub-title label">Boarding Info</div>
+          <ol class="terms">
+            <li>Trip Brief Agent 先把你的句子變成結構化需求；Timezone / Local Discovery（帶網路搜尋）並行做功課；Composer 合成逐日行程；渲染器印出封面與每日票券。</li>
+            <li>真實模式全程約 5–8 分鐘（網路搜尋佔大半）。過程中每個 agent 的狀態都會誠實記錄在手冊裡。</li>
+            <li>下一步可以選擇連結 Gmail / Calendar / Notion 讓行程更貼近你既有的訂位與行事曆，或直接跳過。</li>
+          </ol>
+          <div><span class="stamp">Punch to begin</span></div>
+        </aside>
+      </div>
+    </section>
+  </div>
+</main>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
+<script>
+const $ = (id) => document.getElementById(id)
+const VISITOR_ID_KEY = 'trip_ticket_visitor_id'
+
+function getVisitorId() {
+  let id = localStorage.getItem(VISITOR_ID_KEY)
+  if (!id || !/^[A-Za-z0-9_-]{8,128}$/.test(id)) {
+    id = 'visitor_' + crypto.randomUUID().replace(/-/g, '')
+    localStorage.setItem(VISITOR_ID_KEY, id)
+  }
+  return id
+}
+
+let turnstileToken = null
+let turnstileRequired = false
+
+async function setupTurnstile() {
+  let config
+  try {
+    const res = await fetch('/api/config')
+    config = await res.json()
+  } catch {
+    config = { turnstile_site_key: null }
+  }
+  if (!config.turnstile_site_key) {
+    $('config-notice').hidden = false
+    return
+  }
+  turnstileRequired = true
+  const render = () => {
+    if (typeof turnstile === 'undefined') { setTimeout(render, 200); return }
+    turnstile.render('#turnstile-container', {
+      sitekey: config.turnstile_site_key,
+      callback: (token) => { turnstileToken = token },
+      'expired-callback': () => { turnstileToken = null },
+      'error-callback': () => { turnstileToken = null },
+    })
+  }
+  render()
+}
+setupTurnstile()
+
+$('punch').addEventListener('click', async () => {
+  const sentence = $('sentence').value.trim()
+  $('error').textContent = ''
+  if (!sentence) { $('sentence').focus(); return }
+  if (turnstileRequired && !turnstileToken) {
+    $('error').textContent = '請先完成驗證（Turnstile）。'
+    return
+  }
+  const visitorId = getVisitorId()
+  $('punch').setAttribute('aria-disabled', 'true')
+  $('punch').textContent = '出票中 · Punching...'
+  let res
+  try {
+    res = await fetch('/api/trips', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ sentence, visitor_id: visitorId, turnstile_token: turnstileToken }),
+    })
+  } catch {
+    $('error').textContent = '連不到伺服器，請確認網路連線後再試一次。'
+    $('punch').removeAttribute('aria-disabled')
+    $('punch').textContent = '出票 · Punch It'
+    return
+  }
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    $('error').textContent = body.error || `伺服器回了 ${res.status}，請再試一次。`
+    $('punch').removeAttribute('aria-disabled')
+    $('punch').textContent = '出票 · Punch It'
+    if (typeof turnstile !== 'undefined') turnstile.reset('#turnstile-container')
+    turnstileToken = null
+    return
+  }
+  const body = await res.json()
+  location.href = `/connect.html?trip=${encodeURIComponent(body.trip_id)}`
+})
+</script>
 </body>
 </html>

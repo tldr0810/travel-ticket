@@ -68,3 +68,8 @@ test('worker/index.mjs has no node: builtin imports', () => {
   const nodeBuiltins = noNodeImports('worker/index.mjs')
   assert.deepEqual(nodeBuiltins, [], `worker/index.mjs must stay Worker-safe — found node: imports: ${nodeBuiltins.join(', ')}`)
 })
+
+test('worker/routes/config.mjs has no node: builtin imports', () => {
+  const nodeBuiltins = noNodeImports('worker/routes/config.mjs')
+  assert.deepEqual(nodeBuiltins, [], `worker/routes/config.mjs must stay Worker-safe — found node: imports: ${nodeBuiltins.join(', ')}`)
+})

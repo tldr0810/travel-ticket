@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>連結帳號 · Trip Ticket</title>
+<meta name="theme-color" content="#efe0c3">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="/ticket.css">
+<style>
+.cards { display: grid; gap: 14px; margin-top: 22px; }
+.card {
+  padding: 16px 18px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,248,234,.18);
+  display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap;
+}
+.card b { display: block; font: 700 15px var(--font-body); color: var(--paper-bright); }
+.card small { display: block; font: 500 12px var(--font-mono); color: var(--paper-ghost); margin-top: 4px; }
+.card .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
+.card[data-s="connected"] .dot { background: var(--signal-ok); }
+.card[data-s="authorization_required"] .dot { background: var(--gold); }
+.card[data-s="configuration_required"] .dot { background: var(--paper-ghost); }
+.card-left { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.card-btn {
+  font: 900 12px "Archivo",sans-serif; text-transform: uppercase; letter-spacing: .08em;
+  padding: 9px 14px; border: 1px solid var(--line-btn); background: var(--paper-bright); color: var(--ink); cursor: pointer;
+}
+.card-btn:hover:not(:disabled) { border-color: var(--rail); color: var(--rail-press); }
+.card-btn:disabled { color: var(--muted); cursor: not-allowed; }
+.done-row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 26px; border-top: 1px dashed rgba(255,248,234,.3); padding-top: 18px; }
+.done-row .cta { flex: 1 1 200px; }
+</style>
+</head>
+<body>
+<main class="page">
+  <div class="ticket-stack">
+    <section class="ticket">
+      <div class="ticket-grid">
+        <div class="main">
+          <div class="eyebrow">Trip Ticket · Connect Accounts</div>
+          <h1>連結<br><span>既有資料</span></h1>
+          <p class="hint">連結 Gmail / Calendar / Notion 之後，Composer 可以參考你既有的訂位確認信、行事曆行程、旅遊筆記——這一步完全自由，跳過也不影響出票。</p>
+          <div class="cards" id="cards">
+            <div class="card" data-provider="gmail" data-s="pending">
+              <div class="card-left"><span class="dot" aria-hidden="true"></span><div><b>Gmail</b><small>讀取訂位／確認信，唯讀</small></div></div>
+              <button type="button" class="card-btn" data-action="gmail">連結 · Connect</button>
+            </div>
+            <div class="card" data-provider="calendar" data-s="pending">
+              <div class="card-left"><span class="dot" aria-hidden="true"></span><div><b>Google Calendar</b><small>比對既有行程時段</small></div></div>
+              <button type="button" class="card-btn" data-action="calendar">連結 · Connect</button>
+            </div>
+            <div class="card" data-provider="notion" data-s="pending">
+              <div class="card-left"><span class="dot" aria-hidden="true"></span><div><b>Notion</b><small>讀取旅遊筆記頁面</small></div></div>
+              <button type="button" class="card-btn" data-action="notion">連結 · Connect</button>
+            </div>
+          </div>
+          <p class="sr-only" id="announce" role="status" aria-live="polite"></p>
+          <p class="hint" id="error" style="color:var(--gold)" role="alert"></p>
+          <div class="done-row">
+            <button type="button" class="cta" id="start">開始出票 · Continue</button>
+            <button type="button" class="cta cta-ghost" id="skip">跳過，直接出票 · Skip</button>
+          </div>
+        </div>
+        <aside class="stub">
+          <div class="stub-title label">Boarding Info</div>
+          <ol class="terms">
+            <li>每個連結都只授權讀取，不會寄信、不會改動你的行事曆或筆記。</li>
+            <li>「連結」會開新分頁完成 Google/Notion 的授權流程，完成後回到這頁即可看到狀態變成已連結。</li>
+            <li>不想連結任何帳號也沒關係——「跳過」直接用你剛剛的句子出票，效果一樣完整。</li>
+          </ol>
+        </aside>
+      </div>
+    </section>
+  </div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id)
+const VISITOR_ID_KEY = 'trip_ticket_visitor_id'
+const params = new URLSearchParams(location.search)
+const tripId = params.get('trip')
+const visitorId = localStorage.getItem(VISITOR_ID_KEY)
+
+if (!tripId) {
+  $('error').textContent = '找不到 trip id，請重新從首頁出票。'
+}
+
+function announce(text) {
+  $('announce').textContent = text
+}
+
+function setCardState(provider, status, message) {
+  const card = document.querySelector(`.card[data-provider="${provider}"]`)
+  card.dataset.s = status
+  const btn = card.querySelector('.card-btn')
+  if (status === 'connected') { btn.textContent = '已連結 · Connected'; btn.disabled = true }
+  else if (status === 'configuration_required') { btn.textContent = '尚未開放'; btn.disabled = true; if (message) card.querySelector('small').textContent = message }
+  else if (status === 'authorization_required') { btn.textContent = '等待授權中...'; btn.disabled = false }
+  else { btn.textContent = '連結 · Connect'; btn.disabled = false }
+}
+
+async function checkStatus(provider) {
+  if (!tripId || !visitorId) return
+  try {
+    const res = await fetch(`/api/trips/${encodeURIComponent(tripId)}/connect/${provider}/status?visitor_id=${encodeURIComponent(visitorId)}`)
+    const body = await res.json()
+    setCardState(provider, body.connected ? 'connected' : 'pending')
+  } catch { /* leave as-is; user can retry via the button */ }
+}
+
+const pollers = {}
+async function startLink(provider) {
+  if (!tripId || !visitorId) return
+  let res
+  try {
+    res = await fetch(`/api/trips/${encodeURIComponent(tripId)}/connect/${provider}/link?visitor_id=${encodeURIComponent(visitorId)}`, { method: 'POST' })
+  } catch {
+    $('error').textContent = '連不到伺服器，請稍後再試。'
+    return
+  }
+  const body = await res.json().catch(() => ({}))
+  if (body.status === 'configuration_required') {
+    setCardState(provider, 'configuration_required', body.message)
+    return
+  }
+  if (body.status === 'authorization_required' && body.authorization_url) {
+    setCardState(provider, 'authorization_required')
+    announce(`已開啟 ${provider} 授權分頁，完成後這裡會自動更新`)
+    window.open(body.authorization_url, '_blank', 'noopener')
+    if (pollers[provider]) clearInterval(pollers[provider])
+    pollers[provider] = setInterval(async () => {
+      const r = await fetch(`/api/trips/${encodeURIComponent(tripId)}/connect/${provider}/status?visitor_id=${encodeURIComponent(visitorId)}`)
+      const s = await r.json().catch(() => ({}))
+      if (s.connected) {
+        setCardState(provider, 'connected')
+        announce(`${provider} 已連結`)
+        clearInterval(pollers[provider])
+      }
+    }, 2000)
+  }
+}
+
+document.querySelectorAll('.card-btn').forEach((btn) => {
+  btn.addEventListener('click', () => startLink(btn.closest('.card').dataset.provider))
+})
+
+;['gmail', 'calendar', 'notion'].forEach(checkStatus)
+
+function goToProgress() {
+  location.href = `/progress.html?trip=${encodeURIComponent(tripId)}`
+}
+$('start').addEventListener('click', goToProgress)
+$('skip').addEventListener('click', goToProgress)
+</script>
+</body>
+</html>

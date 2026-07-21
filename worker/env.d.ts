@@ -16,7 +16,10 @@ export interface Env {
   COMPOSIO_CALENDAR_AUTH_CONFIG_ID?: string
   COMPOSIO_NOTION_AUTH_CONFIG_ID?: string
 
-  // Turnstile — absent until Zack provisions it.
+  // Turnstile — absent until Zack provisions it. SITE_KEY is public/client-side
+  // (served via GET /api/config to worker/public/index.html); SECRET_KEY is
+  // server-side-only, checked by worker/routes/create-trip.mjs.
+  TURNSTILE_SITE_KEY?: string
   TURNSTILE_SECRET_KEY?: string
 }
 

@@ -17,6 +17,7 @@
 import { handleCreateTrip } from './routes/create-trip.mjs'
 import { handleTripStatus } from './routes/status.mjs'
 import { handleConnectLink, handleConnectStatus } from './routes/connect.mjs'
+import { handleConfig } from './routes/config.mjs'
 import { getTripFile } from './storage.mjs'
 
 function jsonResponse(body, status) {
@@ -26,6 +27,10 @@ function jsonResponse(body, status) {
 // segments is the path with the leading 'api' already stripped, e.g.
 // ['trips'], ['trips', ':id', 'status'], ['trips', ':id', 'connect', ':provider', 'link'].
 async function routeApi(request, env, segments) {
+  if (segments.length === 1 && segments[0] === 'config') {
+    if (request.method !== 'GET') return jsonResponse({ error: 'method not allowed' }, 405)
+    return handleConfig(request, env)
+  }
   if (segments[0] !== 'trips') return jsonResponse({ error: 'not found' }, 404)
 
   if (segments.length === 1) {

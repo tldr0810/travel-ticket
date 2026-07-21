@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>出票中 · Trip Ticket</title>
+<meta name="theme-color" content="#efe0c3">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="/ticket.css">
+</head>
+<body>
+<main class="page">
+  <div class="ticket-stack">
+    <section class="ticket">
+      <div class="ticket-grid">
+        <div class="main">
+          <div class="eyebrow">Trip Ticket · Printing In Progress</div>
+          <h1 id="heading">出票<br><span>進行中</span></h1>
+          <p class="hint" id="hint">Agents 正在工作中——這頁會每 1.5 秒更新一次進度，完成後自動跳到你的手冊。</p>
+          <div class="board" id="board">
+            <div id="agents"></div>
+            <div class="logbox" id="log"></div>
+          </div>
+          <p class="sr-only" id="announce" role="status" aria-live="polite"></p>
+          <p class="hint" id="error" style="color:var(--gold)" role="alert"></p>
+        </div>
+        <aside class="stub">
+          <div class="stub-title label">Boarding Info</div>
+          <ol class="terms">
+            <li>真實模式全程約 5–8 分鐘，網路搜尋（Local Discovery Agent）通常佔大半時間。</li>
+            <li>每個 agent 的狀態都誠實記錄——某個 agent 顯示 skipped 或 failed 不代表整趟出票失敗，Composer 會用能拿到的資料排出行程。</li>
+            <li>完成後這頁會自動跳轉到你的車票手冊，不需要手動重新整理。</li>
+          </ol>
+        </aside>
+      </div>
+    </section>
+  </div>
+</main>
+<script>
+const AGENTS = ['Trip Brief Agent', 'Timezone Agent', 'Local Discovery Agent', 'Travel Context Agent', 'Calendar Agent', 'Notion Agent', 'Itinerary Composer Agent']
+const $ = (id) => document.getElementById(id)
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))
+const params = new URLSearchParams(location.search)
+const tripId = params.get('trip')
+
+let lastAnnounced = ''
+function announce(text) {
+  if (text === lastAnnounced) return
+  lastAnnounced = text
+  $('announce').textContent = text
+}
+
+// diff-guard, same pattern as pipeline/studio.html's poll(): innerHTML rebuild
+// resets focus/blink animation, so skip it when nothing actually changed.
+let lastAgentsKey = ''
+function renderAgents(agents, running) {
+  const key = JSON.stringify([agents, running])
+  if (key === lastAgentsKey) return
+  lastAgentsKey = key
+  $('agents').innerHTML = AGENTS.map((name) => {
+    const s = esc(agents[name] || (running ? 'running' : 'pending'))
+    return `<div class="agent-row" data-s="${s}"><span class="dot"></span><span>${esc(name.replace(' Agent', ''))}</span><span class="agent-status">${s}</span></div>`
+  }).join('')
+}
+
+let lastLogText = ''
+function renderLog(log) {
+  const text = (log || []).slice(-16).join('\n')
+  if (text === lastLogText) return
+  lastLogText = text
+  const box = $('log')
+  const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 4
+  box.textContent = text
+  if (atBottom) box.scrollTop = box.scrollHeight
+}
+
+let polling = null
+let lastPhase = ''
+let pollFailures = 0
+async function poll() {
+  let s
+  try {
+    const res = await fetch(`/api/trips/${encodeURIComponent(tripId)}/status`)
+    if (!res.ok) throw new Error(String(res.status))
+    s = await res.json()
+    pollFailures = 0
+  } catch {
+    pollFailures += 1
+    if (pollFailures === 3) $('error').textContent = '暫時連不上伺服器，繼續重試中。'
+    return
+  }
+  const phaseChanged = s.phase !== lastPhase
+  lastPhase = s.phase
+  renderAgents(s.agents || {}, s.phase === 'running' || s.phase === 'queued')
+  renderLog(s.log)
+  if (s.phase === 'queued') {
+    announce('排隊中，即將開始')
+  } else if (s.phase === 'running') {
+    const doneCount = Object.values(s.agents || {}).filter((v) => v !== 'running' && v !== 'pending').length
+    announce(`Agents 工作中，${doneCount} / ${AGENTS.length} 完成`)
+  } else if (s.phase === 'done') {
+    clearInterval(polling); polling = null
+    if (phaseChanged) announce('手冊完成，正在打開')
+    location.href = `/trips/${encodeURIComponent(tripId)}/`
+  } else if (s.phase === 'error') {
+    clearInterval(polling); polling = null
+    $('error').textContent = '出票失敗：' + (s.error || '原因不明，請重新從首頁再試一次。')
+    if (phaseChanged) announce('出票失敗')
+  }
+}
+
+if (!tripId) {
+  $('error').textContent = '找不到 trip id，請重新從首頁出票。'
+} else {
+  polling = setInterval(poll, 1500)
+  poll()
+}
+</script>
+</body>
+</html>

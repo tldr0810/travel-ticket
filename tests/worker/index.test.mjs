@@ -23,6 +23,15 @@ const makeEnv = () => ({
   ASSETS: { fetch: async () => new Response('app shell', { status: 200 }) },
 })
 
+test('handleFetch: GET /api/config routes to handleConfig', async () => {
+  const env = makeEnv()
+  env.TURNSTILE_SITE_KEY = '0xsite'
+  const res = await handleFetch(new Request('https://example.com/api/config'), env)
+  assert.equal(res.status, 200)
+  const body = await res.json()
+  assert.equal(body.turnstile_site_key, '0xsite')
+})
+
 test('handleFetch: unknown API path -> 404 JSON', async () => {
   const env = makeEnv()
   const res = await handleFetch(new Request('https://example.com/api/nonsense'), env)
