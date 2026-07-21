@@ -2,9 +2,16 @@
 
 **Goal:** Migrate the trip-ticket pipeline from a local-only Node CLI/Studio app to a
 publicly reachable Cloudflare Workers service — Worker (pages + API) + Workflows
-(pipeline) + R2 (rendered sites + itinerary JSON) + KV (progress) — with the exact
+(pipeline) + KV (rendered sites + itinerary JSON + progress) — with the exact
 user flow, security posture, and full feature scope (incl. AI custom themes) fixed
 by the spec. No feature reduction, no re-litigating settled decisions.
+
+**2026-07-21 update:** storage is **KV-only**, not R2 — enabling R2 requires adding
+a credit card on the Cloudflare account and Zack doesn't want to do that right now;
+KV already works without one (verified via `wrangler kv namespace list` against the
+live account). Two namespaces: `TRIPS_KV` (progress status) and `TRIPS_SITES`
+(rendered site files, key `trips/<id>/<path>`, KV's 25MiB per-value limit is ample).
+Every "R2" reference below (Task 4/5/9) should be read as "KV namespace `TRIPS_SITES`".
 
 **Spec:** `docs/superpowers/specs/2026-07-21-public-cloud-deploy-design.md` (single source of truth for architecture/decisions)
 **Prior handover:** `HANDOVER-CLOUD.md` (known traps, Zack's must-do list, acceptance criteria)

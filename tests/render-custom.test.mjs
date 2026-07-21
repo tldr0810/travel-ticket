@@ -58,3 +58,45 @@ test('custom postmark motif is escaped for SVG and its generated JS literal', ()
   assert.ok(scripts.length > 0)
   for (const script of scripts) assert.doesNotThrow(() => new Function(script))
 })
+
+test('custom postmark motif neutralizes an attribute-escape payload', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'render-'))
+  const attack = '"><img src=x onerror=alert(1)>'
+  const escaped = attack.replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[char]))
+  renderItinerary(MIN_ITIN, {
+    outDir: dir,
+    customMotifs: { stampText: attack, eyebrow: attack },
+  })
+  const html = renderedHtml(dir)
+
+  assert.ok(!html.includes(attack))
+  assert.ok(!html.includes('<img src=x onerror=alert(1)>'))
+  assert.ok(html.includes(` + ${JSON.stringify(escaped)} + '</text>'`))
+  assert.ok(html.includes(`<div class="eyebrow">${escaped}</div>`))
+
+  const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1])
+  for (const script of scripts) assert.doesNotThrow(() => new Function(script))
+})
+
+test('custom postmark motif neutralizes an SVG event-handler payload', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'render-'))
+  const attack = '<svg onload=alert(1)>MARK</svg>'
+  const escaped = attack.replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[char]))
+  renderItinerary(MIN_ITIN, {
+    outDir: dir,
+    customMotifs: { stampText: attack, eyebrow: attack },
+  })
+  const html = renderedHtml(dir)
+
+  assert.ok(!html.includes(attack))
+  assert.ok(!html.includes('<svg onload=alert(1)>MARK</svg>'))
+  assert.ok(html.includes(` + ${JSON.stringify(escaped)} + '</text>'`))
+  assert.ok(html.includes(`<div class="eyebrow">${escaped}</div>`))
+
+  const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1])
+  for (const script of scripts) assert.doesNotThrow(() => new Function(script))
+})

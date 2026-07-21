@@ -12,6 +12,17 @@ Manyfold agent（`AGENT_PIPELINE`）處理 brief/discovery/composer 三站，
 下面 §1/§5 的「只留 sdk backend」已不適用，改看此更正段落；其餘章節
 （Workflow 步驟、motifs 安全渲染、防濫用）不受影響，照舊。
 
+**更正 2（2026-07-21 再晚一點）**：儲存層決策改為 **KV-only**，取代原本
+「R2（行程 JSON + 渲染站）+ KV（進度）」。原因：Cloudflare 啟用 R2 要求
+綁信用卡，Zack 不想現在做這件事；已實測 KV 不需要信用卡（帳號下已有
+hn-lens 的 KV namespace 可佐證）。改用兩個 KV namespace：`TRIPS_KV`（進度
+狀態，`trip:<id>:status`）與 `TRIPS_SITES`（渲染好的網站檔案，key
+`trips/<id>/<path>`，value 上限 25MiB 綽綽有餘）。下面 §1/§3 提到的 R2
+一律改讀 KV；`worker/storage.mjs` 的介面簽名不變（`saveTripFiles`/
+`saveTripJson`/`getTripFile`/`writeStatus`/`readStatus`），只是底層綁定
+從 R2Bucket 換成 KVNamespace。免費額度（1,000 次寫入/天、100,000 次
+讀取/天）對這個流量規模綽綽有餘。
+
 **目標**：讓任何人在公開網址貼一句話出票，過程中被引導（但不強制）連結
 Gmail / Google Calendar / Notion 讓行程更個人化。全功能對齊本機版
 （含 AI 客製主題），不做閹割版。
