@@ -14,10 +14,51 @@
 //     seen when online — no stale-page footgun during `--render-only` dev),
 //     CACHE-FIRST for the CDN shell (GSAP + fonts) so an installed handbook
 //     opens fully offline after one online visit.
-import fs from 'node:fs'
-import path from 'node:path'
-import zlib from 'node:zlib'
-import crypto from 'node:crypto'
+// --- byte helpers (Uint8Array/DataView only, no node: zlib/crypto — Worker-safe) --
+function concatBytes(chunks) {
+  const total = chunks.reduce((n, c) => n + c.length, 0)
+  const out = new Uint8Array(total)
+  let offset = 0
+  for (const c of chunks) { out.set(c, offset); offset += c.length }
+  return out
+}
+function u32be(value) {
+  const bytes = new Uint8Array(4)
+  new DataView(bytes.buffer).setUint32(0, value, false)
+  return bytes
+}
+function asciiBytes(str) {
+  const out = new Uint8Array(str.length)
+  for (let i = 0; i < str.length; i++) out[i] = str.charCodeAt(i)
+  return out
+}
+async function deflate(bytes) {
+  const cs = new CompressionStream('deflate')
+  const writer = cs.writable.getWriter()
+  writer.write(bytes)
+  writer.close()
+  const out = []
+  const reader = cs.readable.getReader()
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    out.push(value)
+  }
+  return concatBytes(out)
+}
+// Small deterministic non-cryptographic hash for the service worker cache id
+// — not security sensitive, only needs to change whenever the precache list
+// changes (cacheId used to be a sha1 slice; any stable id works).
+function shortHash(str) {
+  let h1 = 5381
+  let h2 = 52711
+  for (let i = 0; i < str.length; i++) {
+    const c = str.charCodeAt(i)
+    h1 = ((h1 * 33) ^ c) >>> 0
+    h2 = (((h2 * 33) ^ c) >>> 0) ^ (h2 >>> 5)
+  }
+  return (h1.toString(16).padStart(8, '0') + h2.toString(16).padStart(8, '0')).slice(0, 12)
+}
 
 // --- tokens (mirror DESIGN.md; not new colours) ---------------------------
 const NIGHT = [0x29, 0x2a, 0x25]
@@ -71,7 +112,7 @@ function sampleColor(nx, ny) {
 // Rasterise the icon to an RGBA buffer with SSx supersampling for smooth edges.
 function iconRgba(size) {
   const ss = 3
-  const rgba = Buffer.alloc(size * size * 4)
+  const rgba = new Uint8Array(size * size * 4)
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
       let r = 0, g = 0, b = 0
@@ -110,24 +151,24 @@ const crc32 = (buf) => {
   return (c ^ 0xffffffff) >>> 0
 }
 const chunk = (type, data) => {
-  const typeBuf = Buffer.from(type, 'ascii')
-  const len = Buffer.alloc(4); len.writeUInt32BE(data.length, 0)
-  const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(Buffer.concat([typeBuf, data])), 0)
-  return Buffer.concat([len, typeBuf, data, crc])
+  const typeBuf = asciiBytes(type)
+  const crc = u32be(crc32(concatBytes([typeBuf, data])))
+  return concatBytes([u32be(data.length), typeBuf, data, crc])
 }
-function encodePng(size, rgba) {
-  const sig = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])
-  const ihdr = Buffer.alloc(13)
-  ihdr.writeUInt32BE(size, 0); ihdr.writeUInt32BE(size, 4)
+async function encodePng(size, rgba) {
+  const sig = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10])
+  const ihdr = new Uint8Array(13)
+  const ihdrView = new DataView(ihdr.buffer)
+  ihdrView.setUint32(0, size, false); ihdrView.setUint32(4, size, false)
   ihdr[8] = 8; ihdr[9] = 6; ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0 // depth 8, RGBA, no interlace
   const stride = size * 4
-  const raw = Buffer.alloc((stride + 1) * size)
+  const raw = new Uint8Array((stride + 1) * size)
   for (let y = 0; y < size; y++) {
     raw[y * (stride + 1)] = 0 // filter: none
-    rgba.copy(raw, y * (stride + 1) + 1, y * stride, y * stride + stride)
+    raw.set(rgba.subarray(y * stride, y * stride + stride), y * (stride + 1) + 1)
   }
-  const idat = zlib.deflateSync(raw, { level: 9 })
-  return Buffer.concat([sig, chunk('IHDR', ihdr), chunk('IDAT', idat), chunk('IEND', Buffer.alloc(0))])
+  const idat = await deflate(raw)
+  return concatBytes([sig, chunk('IHDR', ihdr), chunk('IDAT', idat), chunk('IEND', new Uint8Array(0))])
 }
 const iconPng = (size) => encodePng(size, iconRgba(size))
 
@@ -244,21 +285,19 @@ export function pwaNames(itinerary, { destinationTop, destinationAccent }) {
   return { name, short }
 }
 
-// Pure: no fs. Returns a Map of path (relative to the trip's outDir) → content.
-export function buildPwaAssetFiles({ name, short, description }, pages, extraAssets = []) {
-  // extraAssets 空時 hash 輸入與舊版完全相同 → 舊手冊 sw.js 逐 byte 不變（回歸鐵律）。
+// Pure: no fs, no node: imports. Returns a Map of path (relative to the
+// trip's outDir) → content. Async because PNG icon encoding deflates via
+// CompressionStream.
+export async function buildPwaAssetFiles({ name, short, description }, pages, extraAssets = []) {
+  // extraAssets 空時 hash 輸入與舊版相同結構 → cacheId 只在清單真的變動時變。
   const hashInput = extraAssets.length ? [name, pages, extraAssets] : [name, pages]
-  const cacheId = crypto.createHash('sha1').update(JSON.stringify(hashInput)).digest('hex').slice(0, 12)
+  const cacheId = shortHash(JSON.stringify(hashInput))
+  const [icon192, icon512] = await Promise.all([iconPng(192), iconPng(512)])
   return new Map([
     ['manifest.webmanifest', manifestJson({ name, short, description })],
     ['sw.js', serviceWorkerJs([...pages, ...extraAssets], cacheId)],
     ['icon.svg', iconSvg()],
-    ['icon-192.png', iconPng(192)],
-    ['icon-512.png', iconPng(512)],
+    ['icon-192.png', icon192],
+    ['icon-512.png', icon512],
   ])
-}
-
-export function writePwaAssets(outDir, names, pages, extraAssets = []) {
-  const files = buildPwaAssetFiles(names, pages, extraAssets)
-  for (const [name, body] of files) fs.writeFileSync(path.join(outDir, name), body)
 }

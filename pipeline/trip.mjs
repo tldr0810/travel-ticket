@@ -27,7 +27,7 @@ import {
 import { THEMES, resolveTheme, recommendThemes, CUSTOM_OPTION } from './themes.mjs'
 import { generateCustomTheme, CUSTOM_ALLOWED_KEYS } from './customTheme.mjs'
 import { validateOverrides } from './contrast.mjs'
-import { renderItinerary } from './render.mjs'
+import { renderItinerary } from './render-local.mjs'
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -495,8 +495,8 @@ export async function renderTicket(plan, choice, { skipRender = false, log = con
 
   let manifest = { artifact_type: 'final_itinerary', trip_id: plan.tripId, preview_status: 'not_rendered' }
   if (!skipRender) {
-    manifest = renderItinerary(itinerary, { outDir: path.join(packageRoot, 'dist'), customTokens, customMotifs })
-    renderItinerary(itinerary, { outDir: path.join(packageRoot, 'dist', 'trips', tripDirName(itinerary)), customTokens, customMotifs })
+    manifest = await renderItinerary(itinerary, { outDir: path.join(packageRoot, 'dist'), customTokens, customMotifs })
+    await renderItinerary(itinerary, { outDir: path.join(packageRoot, 'dist', 'trips', tripDirName(itinerary)), customTokens, customMotifs })
     log(`rendered ${manifest.pages.length} pages to dist/ (+ trips/${tripDirName(itinerary)})`)
   }
 

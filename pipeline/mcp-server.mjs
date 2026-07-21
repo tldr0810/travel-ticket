@@ -9,7 +9,7 @@ import crypto from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { ITINERARY_SCHEMA, ITINERARY_EXAMPLE, normalizeItinerary } from './itinerary-schema.mjs'
 import { runTimezoneAgent } from './timezone.mjs'
-import { renderItinerary } from './render.mjs'
+import { renderItinerary } from './render-local.mjs'
 import { THEMES, DEFAULT_TOKENS, resolveTheme } from './themes.mjs'
 import { checkTokens, validateOverrides } from './contrast.mjs'
 import { CUSTOM_ALLOWED_KEYS } from './customTheme.mjs'
@@ -54,14 +54,14 @@ function resolveDesign(itinerary, design) {
   }
 }
 
-function renderTicket({ itineraryJson, design }) {
+async function renderTicket({ itineraryJson, design }) {
   const itinerary = normalizeItinerary(itineraryJson)
   const selected = resolveDesign(itinerary, design)
   itinerary.theme = selected.theme
   if (selected.customTokens) itinerary.custom_theme = { name: selected.theme_used.name, tokens: selected.customTokens, motifs: selected.customMotifs ?? {} }
   const tripDir = `${itinerary.slug}-${itinerary.trip_id.split('_').at(-1).slice(0, 8)}`
   const outDir = path.join(packageRoot, 'dist', 'trips', tripDir)
-  const manifest = renderItinerary(itinerary, { outDir, customTokens: selected.customTokens, customMotifs: selected.customMotifs })
+  const manifest = await renderItinerary(itinerary, { outDir, customTokens: selected.customTokens, customMotifs: selected.customMotifs })
   fs.mkdirSync(tripsDataDir, { recursive: true })
   fs.writeFileSync(path.join(tripsDataDir, `${tripDir}.json`), JSON.stringify(itinerary, null, 2))
   return {

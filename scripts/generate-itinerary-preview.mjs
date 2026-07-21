@@ -3,7 +3,7 @@
 // holds the demo trip data and cover copy.
 import fs from 'node:fs'
 import path from 'node:path'
-import { renderItinerary } from '../pipeline/render.mjs'
+import { renderItinerary } from '../pipeline/render-local.mjs'
 
 const tripId = 'trip_20260702T142412Z_470b657c'
 const root = process.cwd()
@@ -186,8 +186,8 @@ fs.writeFileSync(path.join(root, '.trip_work', 'final_itinerary.json'), JSON.str
 fs.writeFileSync(path.join(root, 'data', 'final_itinerary.json'), JSON.stringify(itinerary, null, 2))
 fs.writeFileSync(path.join(root, 'data', 'trips', `${tripDir}.json`), JSON.stringify(itinerary, null, 2))
 
-const manifest = renderItinerary(itinerary, { outDir: path.join(root, 'dist') })
-renderItinerary(itinerary, { outDir: path.join(root, 'dist', 'trips', tripDir) })
+const manifest = await renderItinerary(itinerary, { outDir: path.join(root, 'dist') })
+await renderItinerary(itinerary, { outDir: path.join(root, 'dist', 'trips', tripDir) })
 
 console.log(JSON.stringify({
   ...manifest,

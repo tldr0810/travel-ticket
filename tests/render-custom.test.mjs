@@ -3,7 +3,8 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { renderItinerary, buildItineraryFiles } from '../pipeline/render.mjs'
+import { buildItineraryFiles } from '../pipeline/render.mjs'
+import { renderItinerary } from '../pipeline/render-local.mjs'
 
 const renderedHtml = (dir) => fs.readdirSync(dir)
   .filter((file) => file.endsWith('.html'))
@@ -22,10 +23,10 @@ const MIN_ITIN = {
   }],
 }
 
-test('buildItineraryFiles is pure and matches what renderItinerary writes to disk', () => {
+test('buildItineraryFiles is pure and matches what renderItinerary writes to disk', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'render-'))
-  renderItinerary(MIN_ITIN, { outDir: dir })
-  const { files } = buildItineraryFiles(MIN_ITIN, { hasPoster: false })
+  await renderItinerary(MIN_ITIN, { outDir: dir })
+  const { files } = await buildItineraryFiles(MIN_ITIN, { hasPoster: false })
 
   assert.ok(files.has('index.html'))
   assert.ok(files.has('day-2026-01-01.html'))
@@ -40,28 +41,28 @@ test('buildItineraryFiles is pure and matches what renderItinerary writes to dis
   }
 })
 
-test('customTokens are injected after theme css', () => {
+test('customTokens are injected after theme css', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'render-'))
-  renderItinerary(MIN_ITIN, { outDir: dir, customTokens: { rail: '#123456', night: '#0a0b0c' } })
+  await renderItinerary(MIN_ITIN, { outDir: dir, customTokens: { rail: '#123456', night: '#0a0b0c' } })
   const html = renderedHtml(dir)
   assert.ok(html.includes('--rail:#123456'))
   assert.ok(html.includes('--night:#0a0b0c'))
 })
 
-test('no customTokens → no injection (regression)', () => {
+test('no customTokens → no injection (regression)', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'render-'))
-  renderItinerary(MIN_ITIN, { outDir: dir })
+  await renderItinerary(MIN_ITIN, { outDir: dir })
   const html = renderedHtml(dir)
   assert.ok(!html.includes('--rail:#123456'))
 })
 
-test('custom postmark motif is escaped for SVG and its generated JS literal', () => {
+test('custom postmark motif is escaped for SVG and its generated JS literal', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'render-'))
   const attack = "MARK</script><script>globalThis.injected='yes'</script>'\\\\slash"
   const escaped = attack.replace(/[&<>"']/g, (char) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[char]))
-  renderItinerary(MIN_ITIN, {
+  await renderItinerary(MIN_ITIN, {
     outDir: dir,
     customMotifs: { stampText: attack, eyebrow: attack },
   })
@@ -77,13 +78,13 @@ test('custom postmark motif is escaped for SVG and its generated JS literal', ()
   for (const script of scripts) assert.doesNotThrow(() => new Function(script))
 })
 
-test('custom postmark motif neutralizes an attribute-escape payload', () => {
+test('custom postmark motif neutralizes an attribute-escape payload', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'render-'))
   const attack = '"><img src=x onerror=alert(1)>'
   const escaped = attack.replace(/[&<>"']/g, (char) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[char]))
-  renderItinerary(MIN_ITIN, {
+  await renderItinerary(MIN_ITIN, {
     outDir: dir,
     customMotifs: { stampText: attack, eyebrow: attack },
   })
@@ -98,13 +99,13 @@ test('custom postmark motif neutralizes an attribute-escape payload', () => {
   for (const script of scripts) assert.doesNotThrow(() => new Function(script))
 })
 
-test('custom postmark motif neutralizes an SVG event-handler payload', () => {
+test('custom postmark motif neutralizes an SVG event-handler payload', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'render-'))
   const attack = '<svg onload=alert(1)>MARK</svg>'
   const escaped = attack.replace(/[&<>"']/g, (char) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[char]))
-  renderItinerary(MIN_ITIN, {
+  await renderItinerary(MIN_ITIN, {
     outDir: dir,
     customMotifs: { stampText: attack, eyebrow: attack },
   })

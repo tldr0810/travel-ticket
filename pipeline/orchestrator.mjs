@@ -22,7 +22,7 @@ import path from 'node:path'
 import readline from 'node:readline/promises'
 import { fileURLToPath } from 'node:url'
 import { planTrip, renderTicket, parseDesignChoice, tripDirName, tripsDataDir, saveTripJson, customTokensFrom, customMotifsFrom } from './trip.mjs'
-import { renderItinerary } from './render.mjs'
+import { renderItinerary } from './render-local.mjs'
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -80,7 +80,7 @@ if (renderOnly) {
     const customTokens = customTokensFrom(itinerary)
     const customMotifs = customMotifsFrom(itinerary)
     if (itinerary.custom_theme?.tokens && !customTokens) console.error('[orchestrator] custom_theme.tokens failed validation — rendering without custom overrides')
-    const manifest = renderItinerary(itinerary, { outDir: path.join(packageRoot, 'dist', 'trips', dir), ...(customTokens ? { customTokens } : {}), ...(customMotifs ? { customMotifs } : {}) })
+    const manifest = await renderItinerary(itinerary, { outDir: path.join(packageRoot, 'dist', 'trips', dir), ...(customTokens ? { customTokens } : {}), ...(customMotifs ? { customMotifs } : {}) })
     console.log(JSON.stringify({ ...manifest, trip_dir: dir }, null, 2))
     process.exit(0)
   }
@@ -95,8 +95,8 @@ if (renderOnly) {
   const customTokens = customTokensFrom(itinerary)
   const customMotifs = customMotifsFrom(itinerary)
   if (itinerary.custom_theme?.tokens && !customTokens) console.error('[orchestrator] custom_theme.tokens failed validation — rendering without custom overrides')
-  const manifest = renderItinerary(itinerary, { outDir: path.join(packageRoot, 'dist'), ...(customTokens ? { customTokens } : {}), ...(customMotifs ? { customMotifs } : {}) })
-  renderItinerary(itinerary, { outDir: path.join(packageRoot, 'dist', 'trips', dir), ...(customTokens ? { customTokens } : {}), ...(customMotifs ? { customMotifs } : {}) })
+  const manifest = await renderItinerary(itinerary, { outDir: path.join(packageRoot, 'dist'), ...(customTokens ? { customTokens } : {}), ...(customMotifs ? { customMotifs } : {}) })
+  await renderItinerary(itinerary, { outDir: path.join(packageRoot, 'dist', 'trips', dir), ...(customTokens ? { customTokens } : {}), ...(customMotifs ? { customMotifs } : {}) })
   console.log(JSON.stringify({ ...manifest, trip_dir: dir }, null, 2))
   process.exit(0)
 }

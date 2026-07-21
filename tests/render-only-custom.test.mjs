@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { customMotifsFrom, customTokensFrom } from '../pipeline/trip.mjs'
-import { renderItinerary } from '../pipeline/render.mjs'
+import { renderItinerary } from '../pipeline/render-local.mjs'
 
 const renderedHtml = (dir) => fs.readdirSync(dir)
   .filter((file) => file.endsWith('.html'))
@@ -54,12 +54,12 @@ test('customMotifsFrom preserves only supported string motifs', () => {
   assert.deepEqual(customMotifsFrom(itin), { stampText: '済', eyebrow: '記念' })
 })
 
-test('end-to-end: renderItinerary restores custom tokens and motifs from a saved itinerary', () => {
+test('end-to-end: renderItinerary restores custom tokens and motifs from a saved itinerary', async () => {
   const itin = { ...MIN_ITIN, custom_theme: { name: 'kyoto-teal', tokens: GOOD_TOKENS, motifs: { stampText: '済', eyebrow: '記念切符' } } }
   const tokens = customTokensFrom(itin)
   const motifs = customMotifsFrom(itin)
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'render-only-'))
-  renderItinerary(itin, { outDir: dir, customTokens: tokens, customMotifs: motifs })
+  await renderItinerary(itin, { outDir: dir, customTokens: tokens, customMotifs: motifs })
   const html = renderedHtml(dir)
   assert.ok(html.includes('--rail:'))
   assert.ok(html.includes('記念切符'))

@@ -2,9 +2,6 @@
 // the ticket-style static site (index.html + day-*.html) into an output dir.
 // Extracted and generalized from scripts/generate-itinerary-preview.mjs so the
 // pipeline (or any caller) can render arbitrary trips, not just the Swiss demo.
-import fs from 'node:fs'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { buildPwaAssetFiles, pwaNames } from './pwa.mjs'
 import { THEMES, themeCss } from './themes.mjs'
 
@@ -1244,10 +1241,11 @@ const barcodeStyle = (seed) => {
   return `background-image:linear-gradient(90deg,${stops.join(',')});background-size:${x}px 100%`
 }
 
-// Pure: no fs. `hasPoster` is passed in (the fs.existsSync read that decides
-// it lives in the renderItinerary wrapper below) so this function touches
-// zero fs APIs and runs unchanged in a Cloudflare Worker.
-export function buildItineraryFiles(itinerary, { customTokens, customMotifs, hasPoster }) {
+// Pure: no fs, no node: imports. `hasPoster` is passed in (the fs.existsSync
+// read that decides it lives in the renderItinerary wrapper in
+// render-local.mjs) so this function runs unchanged in a Cloudflare Worker.
+// Async because PWA icon generation deflates PNG data via CompressionStream.
+export async function buildItineraryFiles(itinerary, { customTokens, customMotifs, hasPoster }) {
   const tripId = itinerary.trip_id || 'trip_unknown'
   const shortId = tripId.split('_').at(-1).slice(0, 4)
   const dtz = itinerary.destination_timezone || 'UTC'
@@ -1620,40 +1618,8 @@ requestAnimationFrame(()=>{ if(!window.__vtIncoming) animateTicketIntro(); });
   ])
   // PWA: manifest + service worker + icons, so the handbook installs to the
   // home screen and opens offline. Self-contained per dir (dist root + wallet).
-  const pwaFiles = buildPwaAssetFiles({ name: appName, short: appShort, description: itinerary.summary || appName }, pages, hasPoster ? ['poster.png'] : [])
+  const pwaFiles = await buildPwaAssetFiles({ name: appName, short: appShort, description: itinerary.summary || appName }, pages, hasPoster ? ['poster.png'] : [])
   for (const [name, body] of pwaFiles) files.set(name, body)
 
   return { tripId, pages, files }
-}
-
-export function renderItinerary(itinerary, { outDir, customTokens, customMotifs }) {
-  const tripId = itinerary.trip_id || 'trip_unknown'
-  // 記念票畫版：data/posters/<trip_id>.png 存在才渲染（檔案是觸發器，欄位只是紀錄）。
-  const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-  const posterSrc = path.join(packageRoot, 'data', 'posters', `${tripId}.png`)
-  const hasPoster = fs.existsSync(posterSrc)
-
-  const { pages, files } = buildItineraryFiles(itinerary, { customTokens, customMotifs, hasPoster })
-
-  // 只清掉本層舊的 .html（保留子目錄——dist 根同時承載 trips/<slug>/ 票夾）。
-  fs.mkdirSync(outDir, { recursive: true })
-  // 海報上票：檔案存在才複製為 poster.png（沿用上面既有的 outDir mkdir，不重複邏輯）。
-  // 反向：海報被移除後重印時，清掉本層殘留的舊 poster.png，避免封面雖無 has-poster
-  // 卻留一張孤兒圖（也讓 PWA precache 清單與實體檔一致）。
-  const outPoster = path.join(outDir, 'poster.png')
-  if (hasPoster) fs.copyFileSync(posterSrc, outPoster)
-  else fs.rmSync(outPoster, { force: true })
-  for (const entry of fs.readdirSync(outDir)) {
-    if (entry.endsWith('.html')) fs.rmSync(path.join(outDir, entry), { force: true })
-  }
-  for (const [name, body] of files) fs.writeFileSync(path.join(outDir, name), body)
-
-  return {
-    artifact_type: 'interactive_itinerary',
-    trip_id: tripId,
-    html_path: path.join(outDir, 'index.html'),
-    pages,
-    slug: itinerary.slug,
-    preview_status: 'ready',
-  }
 }
