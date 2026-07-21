@@ -81,7 +81,7 @@ export async function handleCreateTrip(request, env) {
     id: tripId,
     params: { tripId, sentence, todayIso, visitorId, design: designResult.design },
   })
-  await writeStatus(env, tripId, { phase: 'queued', trip_id: tripId })
+  await writeStatus(env, tripId, { phase: 'queued', trip_id: tripId, agents: {}, log: [], manifest: null, error: null })
 
   return jsonResponse({ trip_id: tripId }, 201)
 }

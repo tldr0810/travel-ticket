@@ -18,9 +18,11 @@ import { createMfContext } from '../pipeline/agents.mjs'
 import { mcpSession } from '../pipeline/composio.mjs'
 import { assembleItinerary } from '../pipeline/trip-core.mjs'
 import type { Env, TripWorkflowParams } from './env.d.ts'
+import { writeStatus } from './storage.mjs'
 import {
   runBriefStep, runTimezoneStep, runDiscoveryStep, runGmailStep, runCalendarStep,
   runNotionStep, runComposerStep, runThemeStep, runRenderStep, runManifestStep,
+  summarizeAgentStatuses,
 } from './pipeline-steps.mjs'
 
 // Each agent already carries its own honest timeout/fallback (trip-core.mjs's
@@ -35,25 +37,37 @@ export class TripPipelineWorkflow extends WorkflowEntrypoint<Env, TripWorkflowPa
     const env = this.env
     const agentStatuses: unknown[] = []
 
+    // Plain (non-step.do) progress ping — derived only from already-resolved
+    // step.do() results, so re-firing on a Workflow replay is harmless. This
+    // is what makes "運行中" agent-by-agent progress visible on the progress
+    // page (spec §2 step 3) instead of the status sitting on 'queued' for the
+    // whole ~6 minute run and only ever flipping straight to done/error.
+    const pingProgress = () => writeStatus(env, tripId, {
+      phase: 'running', trip_id: tripId, ...summarizeAgentStatuses(agentStatuses), manifest: null, error: null,
+    })
+
     let ctx, briefRes
     try {
       ctx = createMfContext(env)
       briefRes = await step.do('brief', STEP_CONFIG, () => runBriefStep(ctx, sentence, todayIso))
     } catch (error) {
       await step.do('manifest', () => runManifestStep(env, tripId, {
-        phase: 'failed',
+        phase: 'error',
         trip_id: tripId,
+        ...summarizeAgentStatuses(agentStatuses),
+        manifest: null,
         error: error instanceof Error ? error.message : String(error),
-        agent_statuses: agentStatuses,
       }))
       throw error
     }
     agentStatuses.push(...briefRes.statuses)
     const brief = briefRes.brief
+    await pingProgress()
 
     const timezoneRes = await step.do('timezone', STEP_CONFIG, () => runTimezoneStep(brief))
     agentStatuses.push(...timezoneRes.statuses)
     const timezone = timezoneRes.timezone
+    await pingProgress()
 
     // authConfigId (per-connector OAuth setup) only matters for creating a new
     // connector link (Task 8's connect-accounts route) — reading an already-
@@ -74,6 +88,7 @@ export class TripPipelineWorkflow extends WorkflowEntrypoint<Env, TripWorkflowPa
     ])
     agentStatuses.push(...discoveryRes.statuses, ...gmailRes.statuses, ...calendarRes.statuses, ...notionRes.statuses)
     const discovery = discoveryRes.discovery
+    await pingProgress()
 
     const composerRes = await step.do('composer', STEP_CONFIG, () => runComposerStep(ctx, {
       sentence, brief, timezone, discovery,
@@ -82,6 +97,7 @@ export class TripPipelineWorkflow extends WorkflowEntrypoint<Env, TripWorkflowPa
     }))
     agentStatuses.push(...composerRes.statuses)
     const composed = composerRes.composed
+    await pingProgress()
 
     const themeRes = design
       ? await step.do('custom_theme', STEP_CONFIG, () => runThemeStep(ctx, { design, brief, promptTemplate: cityThemePrompt }))
@@ -109,9 +125,9 @@ export class TripPipelineWorkflow extends WorkflowEntrypoint<Env, TripWorkflowPa
     await step.do('manifest', STEP_CONFIG, () => runManifestStep(env, tripId, {
       phase: 'done',
       trip_id: tripId,
-      slug: itinerary.slug,
-      status: itinerary.status,
-      agent_statuses: agentStatuses,
+      ...summarizeAgentStatuses(agentStatuses),
+      manifest: { slug: itinerary.slug, status: itinerary.status },
+      error: null,
       page_count: renderRes.pageCount,
     }))
 

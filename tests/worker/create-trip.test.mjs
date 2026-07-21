@@ -74,6 +74,10 @@ test('handleCreateTrip: valid token + valid body -> 201, workflow triggered, que
 
     const status = await readStatus(env, body.trip_id)
     assert.equal(status.phase, 'queued')
+    assert.deepEqual(status.agents, {})
+    assert.deepEqual(status.log, [])
+    assert.equal(status.manifest, null)
+    assert.equal(status.error, null)
   })
 })
 

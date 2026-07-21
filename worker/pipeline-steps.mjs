@@ -125,3 +125,18 @@ export async function runManifestStep(env, tripId, status) {
   await writeStatus(env, tripId, status)
   return status
 }
+
+// Reduces the Workflow's running agentStatuses log into the {agents, log}
+// shape worker/routes/status.mjs polls — mirrors server.mjs/studio.html's
+// existing {phase, agents, log, manifest, error} status contract (agents:
+// name -> latest status string; log: human-readable "name: notes" lines) so
+// the progress page's polling logic ports with minimal changes, per the plan.
+export function summarizeAgentStatuses(agentStatuses) {
+  const agents = {}
+  const log = []
+  for (const s of agentStatuses) {
+    agents[s.agent] = s.status
+    log.push(`${s.agent}: ${s.notes}`)
+  }
+  return { agents, log }
+}

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {
   runBriefStep, runTimezoneStep, runDiscoveryStep, runGmailStep, runCalendarStep,
   runNotionStep, runComposerStep, runThemeStep, runRenderStep, runManifestStep,
+  summarizeAgentStatuses,
 } from '../../worker/pipeline-steps.mjs'
 
 // A ctx whose LLM calls always fail — exercises every stage's honest-fallback
@@ -122,4 +123,31 @@ test('runRenderStep + runManifestStep: writes rendered files and a status manife
   assert.equal(status.phase, 'done')
   const savedStatus = await env.TRIPS_KV.get('trip:trip_test_0001:status', 'json')
   assert.equal(savedStatus.slug, 'zurich-2027')
+})
+
+test('summarizeAgentStatuses: reduces the agent_statuses log into {agents, log}', () => {
+  const { agents, log } = summarizeAgentStatuses([
+    { agent: 'Trip Brief Agent', status: 'completed', confidence: 0.9, notes: 'Completed in 2s.' },
+    { agent: 'Local Discovery Agent', status: 'failed', confidence: 0, notes: 'timed out' },
+    { agent: 'Travel Context Agent', status: 'skipped', confidence: 0, notes: 'COMPOSIO_API_KEY not set; booking emails were not checked.' },
+  ])
+  assert.deepEqual(agents, {
+    'Trip Brief Agent': 'completed',
+    'Local Discovery Agent': 'failed',
+    'Travel Context Agent': 'skipped',
+  })
+  assert.deepEqual(log, [
+    'Trip Brief Agent: Completed in 2s.',
+    'Local Discovery Agent: timed out',
+    'Travel Context Agent: COMPOSIO_API_KEY not set; booking emails were not checked.',
+  ])
+})
+
+test('summarizeAgentStatuses: a later entry for the same agent overwrites the earlier one', () => {
+  const { agents } = summarizeAgentStatuses([
+    { agent: 'Itinerary Composer Agent', status: 'failed', confidence: 0, notes: 'x' },
+    { agent: 'Orchestrator Fallback Composer', status: 'completed', confidence: 0.5, notes: 'Composer agent unavailable; itinerary composed locally.' },
+  ])
+  assert.equal(agents['Itinerary Composer Agent'], 'failed')
+  assert.equal(agents['Orchestrator Fallback Composer'], 'completed')
 })
