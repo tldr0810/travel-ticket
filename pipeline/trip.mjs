@@ -25,7 +25,7 @@ import {
   runStructuredJson,
 } from './agents-local.mjs'
 import { THEMES, resolveTheme, recommendThemes, CUSTOM_OPTION } from './themes.mjs'
-import { generateCustomTheme, CUSTOM_ALLOWED_KEYS } from './customTheme.mjs'
+import { generateCustomTheme, CUSTOM_ALLOWED_KEYS } from './customTheme-local.mjs'
 import { validateOverrides } from './contrast.mjs'
 import { renderItinerary } from './render-local.mjs'
 

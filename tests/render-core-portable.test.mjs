@@ -28,3 +28,8 @@ test('pwa.mjs (the portable core) has no node: builtin imports', () => {
 test('pwa.mjs does not use the Node-only Buffer global', () => {
   assert.equal(noBufferUsage('pipeline/pwa.mjs'), 0, 'pwa.mjs must use Uint8Array/DataView instead of Buffer to stay Worker-safe')
 })
+
+test('customTheme.mjs (the portable core) has no node: builtin imports', () => {
+  const nodeBuiltins = noNodeImports('pipeline/customTheme.mjs')
+  assert.deepEqual(nodeBuiltins, [], `customTheme.mjs must stay Worker-safe — found node: imports: ${nodeBuiltins.join(', ')}`)
+})

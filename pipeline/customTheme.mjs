@@ -1,15 +1,13 @@
 // Custom ticket theme: generate via LLM prompt → gate (format + contrast) →
 // one repair retry → honest fallback. Ephemeral by design: results are NEVER
 // registered into themes.mjs; promotion to preset is a manual maintainer ritual.
-import fs from 'node:fs'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+// Pure: no fs, no node: imports. `promptTemplate` is passed in (the fs read of
+// prompts/city-theme.txt lives in customTheme-local.mjs, or a Worker text-module
+// import) so this function runs unchanged in a Cloudflare Worker.
 import { checkTokens, validateOverrides } from './contrast.mjs'
 import { DEFAULT_TOKENS } from './themes.mjs'
 
 export const CUSTOM_ALLOWED_KEYS = ['rail', 'rail-deep', 'rail-press', 'stamp', 'night', 'gold', 'green', 'blue', 'board', 'board-hi', 'board-lo', 'board-edge']
-
-const PROMPT_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), 'prompts', 'city-theme.txt')
 
 const THEME_SCHEMA = {
   type: 'object',
@@ -34,12 +32,9 @@ const gate = (tokens) => {
 // through gate({}) as "no problems, no failures" → false ok:true.
 const isUsableTokens = (t) => t !== null && typeof t === 'object' && !Array.isArray(t) && Object.keys(t).length > 0
 
-export async function generateCustomTheme({ destination, style, llm }) {
-  let template
-  try { template = fs.readFileSync(PROMPT_PATH, 'utf8') } catch (e) {
-    return { ok: false, reason: `prompt template missing: ${e.message}`, failures: [] }
-  }
-  const prompt = template.replace('{{DESTINATION}}', destination).replace('{{USER_STYLE}}', style || '(none)')
+export async function generateCustomTheme({ destination, style, llm, promptTemplate }) {
+  if (!promptTemplate) return { ok: false, reason: 'prompt template missing', failures: [] }
+  const prompt = promptTemplate.replace('{{DESTINATION}}', destination).replace('{{USER_STYLE}}', style || '(none)')
   const system = 'You are the theme generator for a retro train-ticket travel product. Respond with strict JSON only.'
   let out
   try { out = await llm({ system, prompt, schema: THEME_SCHEMA }) } catch (e) {
