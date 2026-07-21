@@ -3,63 +3,35 @@
 // pure code; the Gmail/Calendar context agents are stubs until a connector is
 // wired in (see README).
 //
-// Three LLM backends:
+// Portable core: zero Node builtins, safe to bundle into a Cloudflare Worker
+// (guarded by tests/agents-core-portable.test.mjs). Two LLM backends live here:
 //   sdk — Anthropic API via @anthropic-ai/sdk (needs ANTHROPIC_API_KEY or an
-//         `ant auth login` profile). Uses real structured outputs. Node-only
-//         (local dev / studio).
-//   cli — headless `claude -p` (Claude Code login / subscription, no API key).
-//         JSON is requested by prompt and validated by parsing. Node-only.
+//         `ant auth login` profile). Uses real structured outputs.
 //   mf  — calls a Manyfold platform agent over the A2A protocol (mf-client.mjs).
 //         Fetch-based, Workers-compatible: this is the backend the deployed
 //         Cloudflare Worker uses, so the public site never holds a raw
 //         Anthropic key — LLM calls run against the user's own Manyfold agent
 //         and are billed to their Manyfold account.
+//
+// The third backend — cli (headless `claude -p`, Claude Code login /
+// subscription, no API key) — spawns a subprocess and is Node-only, so it
+// (plus poster generation, also fs/exec-based) lives in `agents-local.mjs`
+// instead. See `createLocalContext` there for backend selection that
+// includes cli.
 import Anthropic from '@anthropic-ai/sdk'
-import { execFile, execFileSync, spawn } from 'node:child_process'
-import fs from 'node:fs'
-import path from 'node:path'
-import { promisify } from 'node:util'
-import { mergedTokens } from './themes.mjs'
 import { mcpSession, composioEnabled } from './composio.mjs'
 import { localToUtc, runTimezoneAgent, tzOffsetMinutes } from './timezone.mjs'
 import { runMfJson } from './mf-client.mjs'
 
 export { localToUtc, runTimezoneAgent, tzOffsetMinutes }
 
-const execFileAsync = promisify(execFile)
-
-const spawnWithStdin = (cmd, args, input) => new Promise((resolve, reject) => {
-  const child = spawn(cmd, args, { stdio: ['pipe', 'pipe', 'pipe'] })
-  let stdout = ''
-  let stderr = ''
-  child.stdout.on('data', (d) => { stdout += d })
-  child.stderr.on('data', (d) => { stderr += d })
-  child.on('error', reject)
-  child.on('close', (code) => {
-    if (code === 0) resolve({ stdout, stderr })
-    else reject(new Error(`${cmd} exited ${code}: ${stderr.slice(0, 500) || stdout.slice(0, 500)}`))
-  })
-  child.stdin.end(input)
-})
-
 export const MODEL = 'claude-opus-4-8'
-
-const hasCommand = async (cmd) => {
-  try {
-    await execFileAsync('which', [cmd])
-    return true
-  } catch {
-    return false
-  }
-}
 
 export async function createContext(preferred) {
   const hasApiCreds = Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN)
-  const backend = preferred
-    ?? (hasApiCreds ? 'sdk' : (await hasCommand('claude')) ? 'cli' : null)
+  const backend = preferred ?? (hasApiCreds ? 'sdk' : null)
   if (backend === 'sdk') return { backend, client: new Anthropic() }
-  if (backend === 'cli') return { backend, client: null }
-  throw new Error('No LLM backend available: set ANTHROPIC_API_KEY (or `ant auth login`), or install the `claude` CLI and log in.')
+  throw new Error('No LLM backend available: set ANTHROPIC_API_KEY (or `ant auth login`). For the `claude` CLI backend, use createLocalContext from agents-local.mjs.')
 }
 
 // Worker-side context: env carries MF_API_URL/MF_API_TOKEN/MF_AGENT_ID plus
@@ -73,36 +45,11 @@ export function createMfContext(env) {
   return { backend: 'mf', env }
 }
 
-// --- claude CLI backend -----------------------------------------------------
-
-const extractJson = (text) => {
-  const stripped = text.replace(/^```(?:json)?\s*/m, '').replace(/```\s*$/m, '')
-  const start = stripped.indexOf('{')
-  const end = stripped.lastIndexOf('}')
-  if (start === -1 || end <= start) throw new Error('no JSON object in CLI response')
-  return JSON.parse(stripped.slice(start, end + 1))
-}
-
-async function runCliJson({ system, prompt, schema, webSearch = false }) {
-  const args = ['-p', '--output-format', 'json', '--append-system-prompt', system]
-  if (process.env.PIPELINE_CLAUDE_MODEL) args.push('--model', process.env.PIPELINE_CLAUDE_MODEL)
-  if (webSearch) args.push('--allowedTools', 'WebSearch,WebFetch')
-  const fullPrompt = [
-    prompt,
-    'Respond with ONLY a single JSON object that validates against this JSON Schema — no code fences, no commentary:',
-    JSON.stringify(schema),
-  ].join('\n\n')
-  const { stdout } = await spawnWithStdin('claude', args, fullPrompt)
-  const envelope = JSON.parse(stdout)
-  if (envelope.is_error) throw new Error(`claude CLI error: ${String(envelope.result).slice(0, 300)}`)
-  return extractJson(envelope.result)
-}
-
-// Backend-agnostic structured-output call (sdk or cli), shared by connector
+// Backend-agnostic structured-output call (sdk or mf), shared by connector
 // agents and (as runStructuredJson) by the trip pipeline for theme work.
+// The cli-aware equivalent lives in agents-local.mjs.
 async function runJson(ctx, { system, prompt, schema, maxTokens = 4000 }) {
   if (!ctx) throw new Error('no LLM context')
-  if (ctx.backend === 'cli') return runCliJson({ system, prompt, schema })
   if (ctx.backend === 'mf') return runMfJson(ctx.env, ctx.env.AGENT_PIPELINE, { system, prompt, schema })
   const response = await ctx.client.messages.create({
     model: MODEL,
@@ -119,7 +66,7 @@ export { runJson as runStructuredJson }
 // ---------------------------------------------------------------------------
 // Structured-output schemas
 
-const BRIEF_SCHEMA = {
+export const BRIEF_SCHEMA = {
   type: 'object',
   properties: {
     destination: { type: 'string', description: 'Human-readable destination, e.g. "Switzerland: Lucerne, Interlaken"' },
@@ -149,7 +96,7 @@ const BRIEF_SCHEMA = {
   additionalProperties: false,
 }
 
-const DISCOVERY_SCHEMA = {
+export const DISCOVERY_SCHEMA = {
   type: 'object',
   properties: {
     pois: {
@@ -216,7 +163,7 @@ const ITEM_SCHEMA = {
   additionalProperties: false,
 }
 
-const COMPOSER_SCHEMA = {
+export const COMPOSER_SCHEMA = {
   type: 'object',
   properties: {
     summary: { type: 'string' },
@@ -288,13 +235,10 @@ const parseStructured = (response) => {
 // ---------------------------------------------------------------------------
 // Agents
 
-const BRIEF_SYSTEM = 'You are the Trip Brief Agent in a travel-planning pipeline. Turn a one-sentence trip request into a structured brief. Interpret conservatively; record every assumption (dates, pace, traveller count) in notes. Dates must be in the future relative to today.'
+export const BRIEF_SYSTEM = 'You are the Trip Brief Agent in a travel-planning pipeline. Turn a one-sentence trip request into a structured brief. Interpret conservatively; record every assumption (dates, pace, traveller count) in notes. Dates must be in the future relative to today.'
 
 export async function runTripBriefAgent(ctx, sentence, todayIso) {
   const prompt = `Today is ${todayIso}. Trip request: ${sentence}`
-  if (ctx.backend === 'cli') {
-    return runCliJson({ system: BRIEF_SYSTEM, prompt, schema: BRIEF_SCHEMA })
-  }
   if (ctx.backend === 'mf') {
     return runMfJson(ctx.env, ctx.env.AGENT_PIPELINE, { system: BRIEF_SYSTEM, prompt, schema: BRIEF_SCHEMA })
   }
@@ -309,13 +253,10 @@ export async function runTripBriefAgent(ctx, sentence, todayIso) {
   return parseStructured(response)
 }
 
-const DISCOVERY_SYSTEM = 'You are the Local Discovery Agent in a travel-planning pipeline. Research the destination with web search: key sights, food areas, and transport legs between bases. Prefer official sources (tourism boards, railway operators, attraction sites). Every transport leg and weather/season-dependent sight should cite a source. Keep the list practical: roughly 3-5 POIs per base, not an encyclopedia.'
+export const DISCOVERY_SYSTEM = 'You are the Local Discovery Agent in a travel-planning pipeline. Research the destination with web search: key sights, food areas, and transport legs between bases. Prefer official sources (tourism boards, railway operators, attraction sites). Every transport leg and weather/season-dependent sight should cite a source. Keep the list practical: roughly 3-5 POIs per base, not an encyclopedia.'
 
 export async function runLocalDiscoveryAgent(ctx, brief) {
   const prompt = `Trip brief:\n${JSON.stringify(brief, null, 2)}`
-  if (ctx.backend === 'cli') {
-    return runCliJson({ system: DISCOVERY_SYSTEM, prompt, schema: DISCOVERY_SCHEMA, webSearch: true })
-  }
   if (ctx.backend === 'mf') {
     // The Manyfold peer agent is a full agent runtime (its own web-search
     // tooling, not a per-call flag) — the system prompt already asks for it.
@@ -479,20 +420,21 @@ export async function runNotionAgent(ctx, brief, deps = {}) {
   }
 }
 
+export const COMPOSER_SYSTEM = [
+  'You are the Itinerary Composer Agent in a travel-planning pipeline. Compose a realistic day-by-day itinerary from the agent inputs.',
+  'Rules:',
+  '- One day object per date from start_date to end_date inclusive; arrival/departure days stay light.',
+  '- Day titles must be short (max ~12 characters): the headline theme only, e.g. "嵐山竹林・天龍寺" or "A → B". Put variant details in item notes, never in the day title.',
+  '- Times are destination-local HH:MM, chronological, non-overlapping within a variant, roughly 09:00-21:00.',
+  '- Provide both a relaxed and a full variant: shared items use variant "both"; upgrades use "full"; low-key alternatives use "relaxed". Include daily meals and at least one rest block on full sightseeing days.',
+  '- Use transport legs and POIs from discovery where available; reference discovery source labels in item sources.',
+  '- Mark uncertain schedules as planning placeholders in notes and add matching warnings.',
+  '- Write summary, notes, warnings and actions in the language of the original request; keep place names in their common form.',
+  '- actions_suggested: booking checks, calendar write, checklist draft — all requires_approval true.',
+  '- handwritten_note (cover + per-day, optional): one short colloquial line (≤22 chars) a companion would pencil on the stub, e.g. paraphrasing the season/booking warning. Strictly a paraphrase of warnings/notes already present — no new facts; omit rather than invent.',
+].join('\n')
+
 export async function runComposerAgent(ctx, { sentence, brief, timezone, discovery, context, calendar }) {
-  const composerSystem = [
-    'You are the Itinerary Composer Agent in a travel-planning pipeline. Compose a realistic day-by-day itinerary from the agent inputs.',
-    'Rules:',
-    '- One day object per date from start_date to end_date inclusive; arrival/departure days stay light.',
-    '- Day titles must be short (max ~12 characters): the headline theme only, e.g. "嵐山竹林・天龍寺" or "A → B". Put variant details in item notes, never in the day title.',
-    '- Times are destination-local HH:MM, chronological, non-overlapping within a variant, roughly 09:00-21:00.',
-    '- Provide both a relaxed and a full variant: shared items use variant "both"; upgrades use "full"; low-key alternatives use "relaxed". Include daily meals and at least one rest block on full sightseeing days.',
-    '- Use transport legs and POIs from discovery where available; reference discovery source labels in item sources.',
-    '- Mark uncertain schedules as planning placeholders in notes and add matching warnings.',
-    '- Write summary, notes, warnings and actions in the language of the original request; keep place names in their common form.',
-    '- actions_suggested: booking checks, calendar write, checklist draft — all requires_approval true.',
-    '- handwritten_note (cover + per-day, optional): one short colloquial line (≤22 chars) a companion would pencil on the stub, e.g. paraphrasing the season/booking warning. Strictly a paraphrase of warnings/notes already present — no new facts; omit rather than invent.',
-  ].join('\n')
   const prompt = [
     `Original request: ${sentence}`,
     `Trip brief:\n${JSON.stringify(brief, null, 2)}`,
@@ -501,18 +443,15 @@ export async function runComposerAgent(ctx, { sentence, brief, timezone, discove
     `Travel context (bookings): ${JSON.stringify(context)}`,
     `Calendar (fixed events): ${JSON.stringify(calendar)}`,
   ].join('\n\n')
-  if (ctx.backend === 'cli') {
-    return runCliJson({ system: composerSystem, prompt, schema: COMPOSER_SCHEMA })
-  }
   if (ctx.backend === 'mf') {
-    return runMfJson(ctx.env, ctx.env.AGENT_PIPELINE, { system: composerSystem, prompt, schema: COMPOSER_SCHEMA }, { timeoutMs: 150_000 })
+    return runMfJson(ctx.env, ctx.env.AGENT_PIPELINE, { system: COMPOSER_SYSTEM, prompt, schema: COMPOSER_SCHEMA }, { timeoutMs: 150_000 })
   }
   const stream = ctx.client.messages.stream({
     model: MODEL,
     max_tokens: 32000,
     thinking: { type: 'adaptive' },
     output_config: { effort: 'high', format: { type: 'json_schema', schema: COMPOSER_SCHEMA } },
-    system: composerSystem,
+    system: COMPOSER_SYSTEM,
     messages: [{ role: 'user', content: prompt }],
   })
   const response = await stream.finalMessage()
@@ -542,81 +481,6 @@ export function posterPrompt({ city, landmarks = [], palette, slogan = '' }) {
   ].filter(Boolean).join(' ')
 }
 
-// codex CLI backend — 海報生成主力（免 API key）。
-// 2026-07-14 更正：codex-cli ≥0.144 已內建圖像生成工具，ChatGPT 帳號 + gpt-5.6-luna
-// 實測可生出高品質 typographic travel poster（codex 先存到 ~/.codex/generated_images/
-// 再自行複製到 outPath）。先前「codex 無生圖能力」的結論是被過時 CLI 誤導——當時獨立 CLI
-// 是 0.142.5，gpt-5.6-luna 回 400（"requires a newer version of Codex"），升級到 0.144.x 即通。
-// （ChatGPT.app 內建的 codex 一直是新版，所以 App 裡看得到生圖。）
-// CLI 太舊、或帳號不支援任何可生圖模型時仍會 throw，orchestrator 會往下降級。
-function posterViaCodex(prompt, outPath) {
-  execFileSync('codex', ['exec', '--skip-git-repo-check',
-    '--dangerously-bypass-approvals-and-sandbox', '-C', path.dirname(outPath),
-    `${prompt}\n\nSave the generated image as a PNG file at exactly this path: ${outPath}. Do not ask questions.`],
-    { timeout: 240_000, stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8' })
-  // codex exec 就算 exit 0 也可能沒真的生圖（CLI 太舊/降級時），所以驗真 PNG magic bytes。
-  if (!fs.existsSync(outPath)) throw new Error('codex exec finished but produced no PNG')
-  const head = fs.readFileSync(outPath).subarray(0, 8)
-  const isPng = head.equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
-  if (!isPng) throw new Error('codex exec wrote a file that is not a valid PNG')
-}
-
-async function posterViaGemini(prompt, outPath) {
-  const key = process.env.GEMINI_API_KEY
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key=${key}`,
-    {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { imageConfig: { aspectRatio: '3:2' } },
-      }),
-    },
-  )
-  if (!res.ok) throw new Error(`Gemini image API ${res.status}: ${(await res.text()).slice(0, 200)}`)
-  const json = await res.json()
-  const part = json.candidates?.[0]?.content?.parts?.find((p) => p.inlineData?.data)
-  if (!part) throw new Error('Gemini response contained no inline image data')
-  fs.writeFileSync(outPath, Buffer.from(part.inlineData.data, 'base64'))
-}
-
-// Poster Agent — 記念票畫版生圖。backend 自動選擇（仿 LLM backend 的降級哲學）：
-// codex CLI → Gemini API → manual（不生圖，prompt 交給使用者）。
-// POSTER_BACKEND=codex|gemini|manual|off 可強制。任何失敗都往下層降，最後誠實 skip。
-export async function runPosterAgent({ city, landmarks, themeName, outPath }) {
-  const palette = mergedTokens(themeName)
-  const prompt = posterPrompt({ city, landmarks, palette })
-  const forced = process.env.POSTER_BACKEND
-  if (forced === 'off') return { status: 'skipped', notes: 'POSTER_BACKEND=off.', prompt }
-
-  const hasCodex = (() => {
-    try { execFileSync('which', ['codex'], { stdio: 'ignore' }); return true }
-    catch { return false }
-  })()
-  const order = forced ? [forced]
-    : [hasCodex && 'codex', process.env.GEMINI_API_KEY && 'gemini', 'manual'].filter(Boolean)
-
-  // 只有真的會寫檔的層（codex/gemini）才建目錄；manual/off/skip 不留空的 data/posters/。
-  const errors = []
-  for (const backend of order) {
-    if (backend === 'manual') {
-      return { status: 'skipped', prompt,
-        notes: `No image backend available (${errors.join('; ') || 'no codex CLI, no GEMINI_API_KEY'}). Poster prompt saved to cover.poster_prompt — generate manually and save to ${outPath}, then re-render.` }
-    }
-    try {
-      if (backend !== 'codex' && backend !== 'gemini') {
-        // 未知/設錯的 backend（例如 POSTER_BACKEND 打錯字）不得回報成功；
-        // throw 進 errors，最後誠實 skip，避免產生指向不存在檔案的 cover.poster。
-        throw new Error(`unknown backend ${backend}`)
-      }
-      fs.mkdirSync(path.dirname(outPath), { recursive: true })
-      if (backend === 'codex') posterViaCodex(prompt, outPath)
-      if (backend === 'gemini') await posterViaGemini(prompt, outPath)
-      return { backend, prompt }
-    } catch (error) {
-      errors.push(`${backend}: ${error.message}`)
-    }
-  }
-  return { status: 'skipped', notes: errors.join('; '), prompt }
-}
+// runPosterAgent (codex CLI / Gemini API / manual backends, all fs-writing)
+// lives in agents-local.mjs — poster generation is local-only, not part of
+// the deployed Worker's pipeline (spec §3 has no poster step).

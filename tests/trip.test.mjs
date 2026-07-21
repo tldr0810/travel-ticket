@@ -12,6 +12,14 @@ test('planTrip --mock returns plan + designOptions, no dist render', async () =>
   assert.ok(designOptions.custom.enabled)
 })
 
+test('planTrip --mock: composio-backed agents (no ctx, mock mode) skip honestly rather than crashing', async () => {
+  const { plan } = await planTrip('', { mock: true, log: () => {} })
+  const byName = Object.fromEntries(plan.agentStatuses.map((s) => [s.agent, s]))
+  for (const name of ['Travel Context Agent', 'Calendar Agent', 'Notion Agent']) {
+    assert.equal(byName[name].status, 'skipped', `${name}: ${byName[name].notes}`)
+  }
+})
+
 test('renderTicket with preset renders and stamps the theme', async () => {
   const { plan } = await planTrip('', { mock: true, log: () => {} })
   const { itinerary, manifest, themeUsed } = await renderTicket(plan, { kind: 'preset', name: 'japan' }, { log: () => {} })

@@ -12,19 +12,18 @@ import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { fileURLToPath } from 'node:url'
+import { runTimezoneAgent, localToUtc } from './agents.mjs'
 import {
-  createContext,
+  createLocalContext as createContext,
   runTripBriefAgent,
   runLocalDiscoveryAgent,
-  runTimezoneAgent,
   runTravelContextAgent,
   runCalendarAgent,
   runNotionAgent,
   runComposerAgent,
   runPosterAgent,
   runStructuredJson,
-  localToUtc,
-} from './agents.mjs'
+} from './agents-local.mjs'
 import { THEMES, resolveTheme, recommendThemes, CUSTOM_OPTION } from './themes.mjs'
 import { generateCustomTheme, CUSTOM_ALLOWED_KEYS } from './customTheme.mjs'
 import { validateOverrides } from './contrast.mjs'
