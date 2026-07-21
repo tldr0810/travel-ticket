@@ -11,7 +11,7 @@
     "demo": "node scripts/generate-itinerary-preview.mjs",
     "composio:smoke": "node scripts/composio-smoke.mjs",
     "deploy": "wrangler deploy --config wrangler.itinerary.toml",
-    "test": "TRIP_NO_LLM=1 node --test 'tests/*.test.mjs'"
+    "test": "TRIP_NO_LLM=1 node --test 'tests/**/*.test.mjs'"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.0",
