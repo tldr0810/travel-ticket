@@ -43,3 +43,13 @@ test('worker/pipeline-steps.mjs has no node: builtin imports', () => {
   const nodeBuiltins = noNodeImports('worker/pipeline-steps.mjs')
   assert.deepEqual(nodeBuiltins, [], `worker/pipeline-steps.mjs must stay Worker-safe — found node: imports: ${nodeBuiltins.join(', ')}`)
 })
+
+test('worker/routes/create-trip.mjs has no node: builtin imports', () => {
+  const nodeBuiltins = noNodeImports('worker/routes/create-trip.mjs')
+  assert.deepEqual(nodeBuiltins, [], `worker/routes/create-trip.mjs must stay Worker-safe — found node: imports: ${nodeBuiltins.join(', ')}`)
+})
+
+test('composio.mjs (the portable core) has no node: builtin imports', () => {
+  const nodeBuiltins = noNodeImports('pipeline/composio.mjs')
+  assert.deepEqual(nodeBuiltins, [], `composio.mjs must stay Worker-safe — found node: imports: ${nodeBuiltins.join(', ')}`)
+})

@@ -24,5 +24,6 @@ export interface TripWorkflowParams {
   tripId: string
   sentence: string
   todayIso: string
+  visitorId: string
   design?: { kind: 'preset'; name: string } | { kind: 'custom'; style: string }
 }

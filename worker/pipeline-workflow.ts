@@ -15,6 +15,7 @@ import { WorkflowEntrypoint } from 'cloudflare:workers'
 import type { WorkflowEvent, WorkflowStep } from 'cloudflare:workers'
 import cityThemePrompt from '../pipeline/prompts/city-theme.txt'
 import { createMfContext } from '../pipeline/agents.mjs'
+import { mcpSession } from '../pipeline/composio.mjs'
 import { assembleItinerary } from '../pipeline/trip-core.mjs'
 import type { Env, TripWorkflowParams } from './env.d.ts'
 import {
@@ -30,7 +31,7 @@ const STEP_CONFIG = { retries: { limit: 1, delay: '5 seconds', backoff: 'linear'
 
 export class TripPipelineWorkflow extends WorkflowEntrypoint<Env, TripWorkflowParams> {
   async run(event: WorkflowEvent<TripWorkflowParams>, step: WorkflowStep) {
-    const { tripId, sentence, todayIso, design } = event.payload
+    const { tripId, sentence, todayIso, visitorId, design } = event.payload
     const env = this.env
     const agentStatuses: unknown[] = []
 
@@ -57,7 +58,14 @@ export class TripPipelineWorkflow extends WorkflowEntrypoint<Env, TripWorkflowPa
     // authConfigId (per-connector OAuth setup) only matters for creating a new
     // connector link (Task 8's connect-accounts route) — reading an already-
     // connected session here only needs the account-level composioApiKey.
-    const composioDeps = { composioApiKey: env.COMPOSIO_API_KEY }
+    // session is scoped to this guest's own visitorId — mcpSession never falls
+    // back to a shared/implicit account (composio.mjs's requireVisitorId), so
+    // this must be passed explicitly or every guest would see the same (empty)
+    // COMPOSIO_USER_ID-keyed session.
+    const composioDeps = {
+      composioApiKey: env.COMPOSIO_API_KEY,
+      session: () => mcpSession({ userId: visitorId, apiKey: env.COMPOSIO_API_KEY }),
+    }
     const [discoveryRes, gmailRes, calendarRes, notionRes] = await Promise.all([
       step.do('discovery', STEP_CONFIG, () => runDiscoveryStep(ctx, brief)),
       step.do('gmail', STEP_CONFIG, () => runGmailStep(ctx, brief, composioDeps)),
