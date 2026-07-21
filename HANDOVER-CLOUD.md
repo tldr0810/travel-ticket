@@ -35,8 +35,11 @@
 - 使用者流程：貼一句話（+Turnstile）→ **必經的連結帳號頁**（Gmail/Calendar/
   Notion 卡片，可明確跳過，文案強調連了更 customised）→ 進度頁輪詢 →
   `/trips/<slug-id>/` 網址即憑證（無登入、不收 email）。
-- LLM backend 部署版只留 `sdk`（Anthropic API）；CLI fallback 是 Node-only，
-  本機保留。費用全接 Zack 的 key。
+- **（2026-07-21 晚更正）LLM backend 部署版改走 `mf`**：呼叫 Zack 自己
+  Manyfold 帳號下的 agent（A2A 協定，`pipeline/mf-client.mjs` + `agents.mjs`
+  的 `createMfContext`），不是 `ANTHROPIC_API_KEY`；費用記在 Manyfold 帳號。
+  單一共用 agent（`AGENT_PIPELINE`）跑 brief/discovery/composer 三站。
+  `sdk`/`cli` 兩個 backend 保留給本機開發用，不受影響。
 - **完整搬遷**：含 AI 客製主題。motifs（stampText/eyebrow）這次要真的做
   escaped render path（舊 deviation 關閉）——這是安全項，公開後任何人都能觸發。
 - 共用策略：純邏輯模組（render/themes/contrast/customTheme/schema/timezone/
@@ -48,7 +51,17 @@
 
 - [ ] `npx wrangler login`（2026-07-21 檢查過：**未登入**，舊 demo 的登入已失效）
       或給 Cloudflare API token（Workers + R2 + KV + Workflows 權限）
-- [ ] Anthropic API key → 設成 Worker secret（`wrangler secret put ANTHROPIC_API_KEY`）
+- [ ] **（新）核准 consent URL**：已用 `mf auth ensure --scopes agents:edit,agents:read,a2a:edit,a2a:read`
+      產生一條 `https://app-staging.manyfold.ai/grant-permission?token=...` 網址並傳給你——
+      這個 agent 沒辦法自己核准，需要你點開網址核准，才能建立下面的 pipeline agent。
+      （網址有效期短，若過期跟這個 agent 說一聲再產生一次即可。）
+- [ ] **（新）建立 `AGENT_PIPELINE` agent**：上面核准後，跑
+      `mf agent create "travel-ticket-pipeline"` 拿到 `agt_...` id，
+      填進 `wrangler.itinerary.toml` 的 `AGENT_PIPELINE = "agt_..."`。
+- [ ] **（新）`MF_API_TOKEN` → 設成 Worker secret**：
+      `wrangler secret put MF_API_TOKEN --config wrangler.itinerary.toml`
+      （這個 agent 自己身份的 token，只有你自己能設定貼上，agent 不會也不能
+      印出/經手這個值）
 - [ ] Composio：`COMPOSIO_API_KEY` + 三個 auth config ID
       （`COMPOSIO_GMAIL_AUTH_CONFIG_ID` / `COMPOSIO_CALENDAR_AUTH_CONFIG_ID` /
       `COMPOSIO_NOTION_AUTH_CONFIG_ID`）→ Worker secrets。

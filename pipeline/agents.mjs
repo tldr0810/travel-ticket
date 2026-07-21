@@ -3,11 +3,17 @@
 // pure code; the Gmail/Calendar context agents are stubs until a connector is
 // wired in (see README).
 //
-// Two LLM backends:
+// Three LLM backends:
 //   sdk — Anthropic API via @anthropic-ai/sdk (needs ANTHROPIC_API_KEY or an
-//         `ant auth login` profile). Uses real structured outputs.
+//         `ant auth login` profile). Uses real structured outputs. Node-only
+//         (local dev / studio).
 //   cli — headless `claude -p` (Claude Code login / subscription, no API key).
-//         JSON is requested by prompt and validated by parsing.
+//         JSON is requested by prompt and validated by parsing. Node-only.
+//   mf  — calls a Manyfold platform agent over the A2A protocol (mf-client.mjs).
+//         Fetch-based, Workers-compatible: this is the backend the deployed
+//         Cloudflare Worker uses, so the public site never holds a raw
+//         Anthropic key — LLM calls run against the user's own Manyfold agent
+//         and are billed to their Manyfold account.
 import Anthropic from '@anthropic-ai/sdk'
 import { execFile, execFileSync, spawn } from 'node:child_process'
 import fs from 'node:fs'
@@ -16,6 +22,7 @@ import { promisify } from 'node:util'
 import { mergedTokens } from './themes.mjs'
 import { mcpSession, composioEnabled } from './composio.mjs'
 import { localToUtc, runTimezoneAgent, tzOffsetMinutes } from './timezone.mjs'
+import { runMfJson } from './mf-client.mjs'
 
 export { localToUtc, runTimezoneAgent, tzOffsetMinutes }
 
@@ -55,6 +62,17 @@ export async function createContext(preferred) {
   throw new Error('No LLM backend available: set ANTHROPIC_API_KEY (or `ant auth login`), or install the `claude` CLI and log in.')
 }
 
+// Worker-side context: env carries MF_API_URL/MF_API_TOKEN/MF_AGENT_ID plus
+// the AGENT_PIPELINE peer id (one shared Manyfold agent handles every stage,
+// distinguished by prompt only — see mf-client.mjs). Constructed explicitly
+// from Worker bindings, not auto-detected from process.env like createContext.
+export function createMfContext(env) {
+  if (!env?.MF_API_URL || !env?.MF_API_TOKEN || !env?.AGENT_PIPELINE) {
+    throw new Error('Manyfold backend needs MF_API_URL, MF_API_TOKEN and AGENT_PIPELINE')
+  }
+  return { backend: 'mf', env }
+}
+
 // --- claude CLI backend -----------------------------------------------------
 
 const extractJson = (text) => {
@@ -85,6 +103,7 @@ async function runCliJson({ system, prompt, schema, webSearch = false }) {
 async function runJson(ctx, { system, prompt, schema, maxTokens = 4000 }) {
   if (!ctx) throw new Error('no LLM context')
   if (ctx.backend === 'cli') return runCliJson({ system, prompt, schema })
+  if (ctx.backend === 'mf') return runMfJson(ctx.env, ctx.env.AGENT_PIPELINE, { system, prompt, schema })
   const response = await ctx.client.messages.create({
     model: MODEL,
     max_tokens: maxTokens,
@@ -276,6 +295,9 @@ export async function runTripBriefAgent(ctx, sentence, todayIso) {
   if (ctx.backend === 'cli') {
     return runCliJson({ system: BRIEF_SYSTEM, prompt, schema: BRIEF_SCHEMA })
   }
+  if (ctx.backend === 'mf') {
+    return runMfJson(ctx.env, ctx.env.AGENT_PIPELINE, { system: BRIEF_SYSTEM, prompt, schema: BRIEF_SCHEMA })
+  }
   const response = await ctx.client.messages.create({
     model: MODEL,
     max_tokens: 4096,
@@ -293,6 +315,11 @@ export async function runLocalDiscoveryAgent(ctx, brief) {
   const prompt = `Trip brief:\n${JSON.stringify(brief, null, 2)}`
   if (ctx.backend === 'cli') {
     return runCliJson({ system: DISCOVERY_SYSTEM, prompt, schema: DISCOVERY_SCHEMA, webSearch: true })
+  }
+  if (ctx.backend === 'mf') {
+    // The Manyfold peer agent is a full agent runtime (its own web-search
+    // tooling, not a per-call flag) — the system prompt already asks for it.
+    return runMfJson(ctx.env, ctx.env.AGENT_PIPELINE, { system: DISCOVERY_SYSTEM, prompt, schema: DISCOVERY_SCHEMA }, { timeoutMs: 150_000 })
   }
   const stream = ctx.client.messages.stream({
     model: MODEL,
@@ -476,6 +503,9 @@ export async function runComposerAgent(ctx, { sentence, brief, timezone, discove
   ].join('\n\n')
   if (ctx.backend === 'cli') {
     return runCliJson({ system: composerSystem, prompt, schema: COMPOSER_SCHEMA })
+  }
+  if (ctx.backend === 'mf') {
+    return runMfJson(ctx.env, ctx.env.AGENT_PIPELINE, { system: composerSystem, prompt, schema: COMPOSER_SCHEMA }, { timeoutMs: 150_000 })
   }
   const stream = ctx.client.messages.stream({
     model: MODEL,

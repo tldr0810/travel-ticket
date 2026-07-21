@@ -1,5 +1,17 @@
 # 公開雲端部署設計 — 一句話出票上 Cloudflare Workers（2026-07-21 定案）
 
+**更正（2026-07-21 同日晚）**：LLM backend 決策改為 **Option B / Manyfold Agent
+API**，取代原本「LLM 全部接 Zack 自己的 `ANTHROPIC_API_KEY`」。原因：Zack
+不想在公開 Worker 上放一把獨立 Anthropic key，LLM 運算改成呼叫 Zack 自己
+Manyfold 帳號下的 agent（走 A2A 協定），算力/費用記在 Manyfold 帳號，不是
+Anthropic 直接扣款。實作對照 `article-lens`（hn-lens/hn-lens-v2）的既有
+模式：`pipeline/mf-client.mjs`（port 自 `src/crew/mf.ts`）＋
+`agents.mjs` 新增 `mf` backend（`createMfContext(env)`），單一共用
+Manyfold agent（`AGENT_PIPELINE`）處理 brief/discovery/composer 三站，
+不像 hn-lens 拆 6 個 agent（成本考量，先簡單版，需要再拆）。
+下面 §1/§5 的「只留 sdk backend」已不適用，改看此更正段落；其餘章節
+（Workflow 步驟、motifs 安全渲染、防濫用）不受影響，照舊。
+
 **目標**：讓任何人在公開網址貼一句話出票，過程中被引導（但不強制）連結
 Gmail / Google Calendar / Notion 讓行程更個人化。全功能對齊本機版
 （含 AI 客製主題），不做閹割版。

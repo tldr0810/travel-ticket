@@ -5,3 +5,16 @@ compatibility_date = "2024-09-23"
 [assets]
 directory = "dist"
 binding = "ASSETS"
+
+# Manyfold Agent API (Option B): the pipeline's LLM calls run against the
+# user's own Manyfold agent over A2A (pipeline/mf-client.mjs), not a raw
+# ANTHROPIC_API_KEY — billed to the Manyfold account, not Anthropic directly.
+[vars]
+MF_API_URL = "https://api-staging.manyfold.ai/api"
+MF_AGENT_ID = "agt_agpyjshs4b7obacdsev6x4m7wm"
+# AGENT_PIPELINE = "agt_..."   # set once the shared pipeline agent is created (see HANDOVER-CLOUD.md)
+
+# Set via: wrangler secret put MF_API_TOKEN --config wrangler.itinerary.toml
+# (this agent's own identity token, granted a2a:read + a2a:edit — Zack must
+# set this himself; it is a live credential and is never printed/handled by
+# the agent that builds this repo.)
