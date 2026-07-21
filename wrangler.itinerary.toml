@@ -60,11 +60,13 @@ class_name = "TripPipelineWorkflow"
 MF_API_URL = "https://api-staging.manyfold.ai/api"
 MF_AGENT_ID = "agt_agpyjshs4b7obacdsev6x4m7wm"
 # Created 2026-07-21 (mf agent create "travel-ticket-pipeline" --account).
-# Still needs a manual A2A grant from Zack (see HANDOVER-CLOUD.md) before
-# MF_AGENT_ID can actually mint a peer token for it.
+# A2A peer grant confirmed live 2026-07-21 (`mf a2a status` lists it as a
+# callable peer) — MF_AGENT_ID can mint a peer token for it.
 AGENT_PIPELINE = "agt_agpyj7n5wr4r3h3euvlbrqehpy"
 
 # Set via: wrangler secret put MF_API_TOKEN --config wrangler.itinerary.toml
-# (this agent's own identity token, granted a2a:read + a2a:edit — Zack must
-# set this himself; it is a live credential and is never printed/handled by
-# the agent that builds this repo.)
+# (this agent's own identity token — the Manyfold runtime already injects it
+# as $MF_API_TOKEN in this agent's own environment for exactly this purpose;
+# `mf auth ensure --scopes a2a:read,a2a:edit` printed a consent URL, Zack
+# approved it, then the token was piped straight from $MF_API_TOKEN into
+# `wrangler secret put` — never printed in chat, per `mf help safety --agent`.)
