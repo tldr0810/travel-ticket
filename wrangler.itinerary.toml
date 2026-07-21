@@ -1,9 +1,16 @@
 name = "trip-tickets-2026"
-main = "worker/index.ts"
+main = "worker/entry.ts"
 compatibility_date = "2024-09-23"
 
+# worker/public/ is the app-shell bundle (home/connect/progress pages) — a
+# small static asset set separate from per-trip content, which is generated
+# per-request into TRIPS_SITES (KV), not built at deploy time. Real pages land
+# in Task 10; a placeholder keeps `directory` pointing at a real, committed
+# folder in the meantime (the old bare "dist" here was local CLI preview
+# output, gitignored — a fresh clone wouldn't have had it, breaking `wrangler
+# deploy`/`dev` before Task 10 even started).
 [assets]
-directory = "dist"
+directory = "worker/public"
 binding = "ASSETS"
 
 # Lets worker/pipeline-workflow.ts `import cityThemePrompt from
