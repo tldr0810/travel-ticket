@@ -304,11 +304,11 @@ const BOOKINGS_SCHEMA = {
 const EXTRACT_SYSTEM = 'You extract travel bookings from emails. Only extract fields literally present in the text; leave missing fields as empty string / omit. NEVER invent vendors, confirmation numbers or dates. If no real bookings, return {"bookings":[]}.'
 
 export async function runTravelContextAgent(ctx, brief, deps = {}) {
-  if (!composioEnabled()) {
+  if (!composioEnabled(deps.composioApiKey)) {
     return { status: 'skipped', confidence: 0, notes: 'COMPOSIO_API_KEY not set; booking emails were not checked.', bookings: [] }
   }
   try {
-    const session = await (deps.session ? deps.session() : mcpSession())
+    const session = await (deps.session ? deps.session() : mcpSession({ apiKey: deps.composioApiKey }))
     const destWord = String(brief?.destination || '').split(/[:,&，、]/)[0].trim()
     const query = `(booking OR reservation OR confirmation OR itinerary OR e-ticket OR 訂位 OR 訂房 OR 確認) ${destWord} newer_than:180d`
     const list = await session.execToolkitTool('GMAIL_FETCH_EMAILS', {
@@ -340,11 +340,11 @@ export async function runTravelContextAgent(ctx, brief, deps = {}) {
 }
 
 export async function runCalendarAgent(ctx, brief, deps = {}) {
-  if (!composioEnabled()) {
+  if (!composioEnabled(deps.composioApiKey)) {
     return { status: 'skipped', confidence: 0, notes: 'COMPOSIO_API_KEY not set; fixed events were not checked.', events: [] }
   }
   try {
-    const session = await (deps.session ? deps.session() : mcpSession())
+    const session = await (deps.session ? deps.session() : mcpSession({ apiKey: deps.composioApiKey }))
     const data = await session.execToolkitTool('GOOGLECALENDAR_EVENTS_LIST', {
       calendarId: 'primary',
       timeMin: `${brief.start_date}T00:00:00Z`,
@@ -388,11 +388,11 @@ const NOTES_SCHEMA = {
 }
 
 export async function runNotionAgent(ctx, brief, deps = {}) {
-  if (!composioEnabled()) {
+  if (!composioEnabled(deps.composioApiKey)) {
     return { status: 'skipped', confidence: 0, notes: 'COMPOSIO_API_KEY not set; Notion notes were not checked.', travel_notes: [] }
   }
   try {
-    const session = await (deps.session ? deps.session() : mcpSession())
+    const session = await (deps.session ? deps.session() : mcpSession({ apiKey: deps.composioApiKey }))
     const destWord = String(brief?.destination || '').split(/[:,&，、]/)[0].trim()
     const found = await session.execToolkitTool('NOTION_SEARCH_NOTION_PAGE', { query: destWord, page_size: 5, filter_value: 'page' })
     const pages = (found?.results ?? []).filter((p) => p?.id)

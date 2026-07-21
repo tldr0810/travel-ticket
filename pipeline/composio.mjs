@@ -1,7 +1,15 @@
 // Composio adapter for user-scoped, read-only travel context. This deliberately
 // uses the current SDK's direct execution API rather than the old shared MCP
 // endpoint: every call carries the visitor's stable userId.
+//
+// Config (API key, auth config ids, CLI user id) is read from process.env by
+// default so local Node callers are unaffected, but every value can be passed
+// explicitly — there is no `process` global in a Cloudflare Worker, so the
+// Worker must pass env.COMPOSIO_API_KEY etc. through explicitly instead of
+// relying on the default.
 import { Composio } from '@composio/core'
+
+const envVar = (key) => (typeof process !== 'undefined' ? process.env[key] : undefined)
 
 const CONNECTORS = {
   gmail: {
@@ -18,7 +26,7 @@ const CONNECTORS = {
   },
 }
 
-export const composioEnabled = () => Boolean(process.env.COMPOSIO_API_KEY)
+export const composioEnabled = (apiKey = envVar('COMPOSIO_API_KEY')) => Boolean(apiKey)
 export const connectorNames = () => Object.keys(CONNECTORS)
 
 const requireVisitorId = (userId) => {
@@ -33,7 +41,7 @@ const connector = (name) => {
   return CONNECTORS[name]
 }
 
-export function createComposioClient(apiKey = process.env.COMPOSIO_API_KEY) {
+export function createComposioClient(apiKey = envVar('COMPOSIO_API_KEY')) {
   if (!apiKey) throw new Error('COMPOSIO_API_KEY not set; connector data cannot be read')
   // The SDK sends x-api-key for every backend request, including projects where
   // that header became mandatory in March 2026.
@@ -45,11 +53,11 @@ const configurationRequired = (visitorId, connectorName) => ({
   message: 'COMPOSIO_API_KEY is not configured on this MCP server.',
 })
 
-export async function connectorStatus({ visitorId, connector: connectorName, client }) {
+export async function connectorStatus({ visitorId, connector: connectorName, client, apiKey = envVar('COMPOSIO_API_KEY') }) {
   const userId = requireVisitorId(visitorId)
   const config = connector(connectorName)
-  if (!client && !composioEnabled()) return configurationRequired(userId, connectorName)
-  client ??= createComposioClient()
+  if (!client && !composioEnabled(apiKey)) return configurationRequired(userId, connectorName)
+  client ??= createComposioClient(apiKey)
   const accounts = await client.connectedAccounts.list({
     userIds: [userId], toolkitSlugs: [config.toolkit], statuses: ['ACTIVE'], limit: 10,
   })
@@ -62,12 +70,12 @@ export async function connectorStatus({ visitorId, connector: connectorName, cli
   }
 }
 
-export async function createConnectorLink({ visitorId, connector: connectorName, client }) {
+export async function createConnectorLink({ visitorId, connector: connectorName, client, apiKey = envVar('COMPOSIO_API_KEY'), authConfigId }) {
   const userId = requireVisitorId(visitorId)
   const config = connector(connectorName)
-  if (!client && !composioEnabled()) return configurationRequired(userId, connectorName)
-  client ??= createComposioClient()
-  const authConfigId = process.env[config.authConfigEnv]
+  if (!client && !composioEnabled(apiKey)) return configurationRequired(userId, connectorName)
+  client ??= createComposioClient(apiKey)
+  authConfigId ??= envVar(config.authConfigEnv)
   if (!authConfigId) {
     return {
       visitor_id: userId, connector: connectorName, status: 'configuration_required',
@@ -158,8 +166,9 @@ export async function fetchNotionContext({ visitorId, destination, client }) {
 
 // Compatibility adapter for the non-MCP CLI pipeline. It deliberately requires
 // COMPOSIO_USER_ID: no implicit or shared account is ever selected.
-export async function mcpSession({ userId = process.env.COMPOSIO_USER_ID, client = createComposioClient() } = {}) {
+export async function mcpSession({ userId = envVar('COMPOSIO_USER_ID'), client, apiKey = envVar('COMPOSIO_API_KEY') } = {}) {
   const visitorId = requireVisitorId(userId)
+  client ??= createComposioClient(apiKey)
   return {
     execToolkitTool: (tool, args) => execute({ client, visitorId, tool, arguments: args }),
   }

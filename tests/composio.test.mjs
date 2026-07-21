@@ -19,6 +19,22 @@ test('composioEnabled reflects only the server API key', async () => {
   await withEnv('COMPOSIO_API_KEY', null, async () => assert.equal(composioEnabled(), false))
 })
 
+test('composioEnabled/createConnectorLink accept an explicit apiKey, ignoring process.env entirely (Worker callers have no process global)', async () => {
+  await withEnv('COMPOSIO_API_KEY', null, async () => {
+    assert.equal(composioEnabled('ck_explicit'), true)
+    const result = await createConnectorLink({ visitorId: 'tt_visitor_1234', connector: 'gmail', apiKey: 'ck_explicit', authConfigId: 'ac_explicit', client: { connectedAccounts: { link: async () => ({ id: 'cr_1', redirectUrl: 'https://connect.example/link' }) } } })
+    assert.equal(result.status, 'authorization_required')
+  })
+})
+
+test('mcpSession accepts an explicit apiKey without reading COMPOSIO_API_KEY from process.env', async () => {
+  await withEnv('COMPOSIO_API_KEY', null, async () => {
+    const client = { tools: { execute: async (_tool, input) => ({ successful: true, data: input }) } }
+    const session = await mcpSession({ userId: 'tt_visitor_1234', apiKey: 'ck_explicit', client })
+    assert.deepEqual(await session.execToolkitTool('X', { a: 1 }), { userId: 'tt_visitor_1234', arguments: { a: 1 }, dangerouslySkipVersionCheck: true })
+  })
+})
+
 test('missing project key returns configuration_required without selecting an account', async () => {
   await withEnv('COMPOSIO_API_KEY', null, async () => {
     const status = await connectorStatus({ visitorId: 'tt_visitor_1234', connector: 'gmail' })

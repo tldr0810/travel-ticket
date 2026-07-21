@@ -11,6 +11,13 @@ test('gmail agent skips without COMPOSIO_API_KEY', async () => {
   assert.deepEqual(r.bookings, [])
 })
 
+test('gmail agent: deps.composioApiKey enables the agent even with COMPOSIO_API_KEY unset (Worker callers have no process.env)', async () => {
+  delete process.env.COMPOSIO_API_KEY
+  const session = { execToolkitTool: async () => ({ messages: [] }) }
+  const r = await runTravelContextAgent(null, BRIEF, { composioApiKey: 'ck_explicit', session: async () => session })
+  assert.equal(r.status, 'ok')
+})
+
 test('gmail agent: session error → skipped with reason', async () => {
   process.env.COMPOSIO_API_KEY = 'ck_test'
   const r = await runTravelContextAgent(null, BRIEF, { session: () => Promise.reject(new Error('HTTP 401 — stale')) })
