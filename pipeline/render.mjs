@@ -5,7 +5,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { writePwaAssets, pwaNames } from './pwa.mjs'
+import { buildPwaAssetFiles, pwaNames } from './pwa.mjs'
 import { THEMES, themeCss } from './themes.mjs'
 
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({
@@ -1244,7 +1244,10 @@ const barcodeStyle = (seed) => {
   return `background-image:linear-gradient(90deg,${stops.join(',')});background-size:${x}px 100%`
 }
 
-export function renderItinerary(itinerary, { outDir, customTokens, customMotifs }) {
+// Pure: no fs. `hasPoster` is passed in (the fs.existsSync read that decides
+// it lives in the renderItinerary wrapper below) so this function touches
+// zero fs APIs and runs unchanged in a Cloudflare Worker.
+export function buildItineraryFiles(itinerary, { customTokens, customMotifs, hasPoster }) {
   const tripId = itinerary.trip_id || 'trip_unknown'
   const shortId = tripId.split('_').at(-1).slice(0, 4)
   const dtz = itinerary.destination_timezone || 'UTC'
@@ -1271,10 +1274,6 @@ export function renderItinerary(itinerary, { outDir, customTokens, customMotifs 
     ? `\n:root{${Object.entries(customTokens).map(([k, v]) => `--${k}:${v}`).join(';')};}`
     : ''
   const themeOverrideCss = themeCss(themeName) + customCss
-  // 記念票畫版：data/posters/<trip_id>.png 存在才渲染（檔案是觸發器，欄位只是紀錄）。
-  const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-  const posterSrc = path.join(packageRoot, 'data', 'posters', `${tripId}.png`)
-  const hasPoster = fs.existsSync(posterSrc)
   const anchorIso = days[0]?.items?.[0]?.start_utc || new Date().toISOString()
 
   const offsetDiffHours = (tzOffsetMinutes(dtz, anchorIso) - tzOffsetMinutes(htz, anchorIso)) / 60
@@ -1614,6 +1613,28 @@ requestAnimationFrame(()=>{ if(!window.__vtIncoming) animateTicketIntro(); });
 </script>`, `Day ${index + 1} · ${day.date} · ${day.title}`, Boolean(day.handwritten_note))
   }
 
+  const pages = ['index.html', ...days.map(pageSlug)]
+  const files = new Map([
+    ['index.html', homeHtml],
+    ...days.map((day, index) => [pageSlug(day), dayHtml(day, index)]),
+  ])
+  // PWA: manifest + service worker + icons, so the handbook installs to the
+  // home screen and opens offline. Self-contained per dir (dist root + wallet).
+  const pwaFiles = buildPwaAssetFiles({ name: appName, short: appShort, description: itinerary.summary || appName }, pages, hasPoster ? ['poster.png'] : [])
+  for (const [name, body] of pwaFiles) files.set(name, body)
+
+  return { tripId, pages, files }
+}
+
+export function renderItinerary(itinerary, { outDir, customTokens, customMotifs }) {
+  const tripId = itinerary.trip_id || 'trip_unknown'
+  // 記念票畫版：data/posters/<trip_id>.png 存在才渲染（檔案是觸發器，欄位只是紀錄）。
+  const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+  const posterSrc = path.join(packageRoot, 'data', 'posters', `${tripId}.png`)
+  const hasPoster = fs.existsSync(posterSrc)
+
+  const { pages, files } = buildItineraryFiles(itinerary, { customTokens, customMotifs, hasPoster })
+
   // 只清掉本層舊的 .html（保留子目錄——dist 根同時承載 trips/<slug>/ 票夾）。
   fs.mkdirSync(outDir, { recursive: true })
   // 海報上票：檔案存在才複製為 poster.png（沿用上面既有的 outDir mkdir，不重複邏輯）。
@@ -1625,21 +1646,13 @@ requestAnimationFrame(()=>{ if(!window.__vtIncoming) animateTicketIntro(); });
   for (const entry of fs.readdirSync(outDir)) {
     if (entry.endsWith('.html')) fs.rmSync(path.join(outDir, entry), { force: true })
   }
-  fs.writeFileSync(path.join(outDir, 'index.html'), homeHtml)
-  for (const [index, day] of days.entries()) {
-    fs.writeFileSync(path.join(outDir, pageSlug(day)), dayHtml(day, index))
-  }
-
-  // PWA: manifest + service worker + icons, so the handbook installs to the
-  // home screen and opens offline. Self-contained per dir (dist root + wallet).
-  const pages = ['index.html', ...days.map(pageSlug)]
-  writePwaAssets(outDir, { name: appName, short: appShort, description: itinerary.summary || appName }, pages, hasPoster ? ['poster.png'] : [])
+  for (const [name, body] of files) fs.writeFileSync(path.join(outDir, name), body)
 
   return {
     artifact_type: 'interactive_itinerary',
     trip_id: tripId,
     html_path: path.join(outDir, 'index.html'),
-    pages: ['index.html', ...days.map(pageSlug)],
+    pages,
     slug: itinerary.slug,
     preview_status: 'ready',
   }

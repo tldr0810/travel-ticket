@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { renderItinerary } from '../pipeline/render.mjs'
+import { renderItinerary, buildItineraryFiles } from '../pipeline/render.mjs'
 
 const renderedHtml = (dir) => fs.readdirSync(dir)
   .filter((file) => file.endsWith('.html'))
@@ -21,6 +21,24 @@ const MIN_ITIN = {
     items: [{ variant: 'both', type: 'visit', title: 'Test stop', start_utc: '2026-01-01T10:00:00Z', end_utc: '2026-01-01T11:00:00Z', location: 'Testland', notes: '', sources: [] }],
   }],
 }
+
+test('buildItineraryFiles is pure and matches what renderItinerary writes to disk', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'render-'))
+  renderItinerary(MIN_ITIN, { outDir: dir })
+  const { files } = buildItineraryFiles(MIN_ITIN, { hasPoster: false })
+
+  assert.ok(files.has('index.html'))
+  assert.ok(files.has('day-2026-01-01.html'))
+  assert.ok(files.has('manifest.webmanifest'))
+  assert.ok(files.has('sw.js'))
+  assert.ok(files.has('icon.svg'))
+  assert.ok(files.has('icon-192.png'))
+  assert.ok(files.has('icon-512.png'))
+  for (const [name, body] of files) {
+    if (name.endsWith('.png')) continue // binary PWA icons: covered by dedicated pwa tests
+    assert.equal(body, fs.readFileSync(path.join(dir, name), 'utf8'), `${name} mismatch`)
+  }
+})
 
 test('customTokens are injected after theme css', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'render-'))

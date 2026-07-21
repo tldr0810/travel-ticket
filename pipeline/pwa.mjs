@@ -244,13 +244,21 @@ export function pwaNames(itinerary, { destinationTop, destinationAccent }) {
   return { name, short }
 }
 
-export function writePwaAssets(outDir, { name, short, description }, pages, extraAssets = []) {
+// Pure: no fs. Returns a Map of path (relative to the trip's outDir) → content.
+export function buildPwaAssetFiles({ name, short, description }, pages, extraAssets = []) {
   // extraAssets 空時 hash 輸入與舊版完全相同 → 舊手冊 sw.js 逐 byte 不變（回歸鐵律）。
   const hashInput = extraAssets.length ? [name, pages, extraAssets] : [name, pages]
   const cacheId = crypto.createHash('sha1').update(JSON.stringify(hashInput)).digest('hex').slice(0, 12)
-  fs.writeFileSync(path.join(outDir, 'manifest.webmanifest'), manifestJson({ name, short, description }))
-  fs.writeFileSync(path.join(outDir, 'sw.js'), serviceWorkerJs([...pages, ...extraAssets], cacheId))
-  fs.writeFileSync(path.join(outDir, 'icon.svg'), iconSvg())
-  fs.writeFileSync(path.join(outDir, 'icon-192.png'), iconPng(192))
-  fs.writeFileSync(path.join(outDir, 'icon-512.png'), iconPng(512))
+  return new Map([
+    ['manifest.webmanifest', manifestJson({ name, short, description })],
+    ['sw.js', serviceWorkerJs([...pages, ...extraAssets], cacheId)],
+    ['icon.svg', iconSvg()],
+    ['icon-192.png', iconPng(192)],
+    ['icon-512.png', iconPng(512)],
+  ])
+}
+
+export function writePwaAssets(outDir, names, pages, extraAssets = []) {
+  const files = buildPwaAssetFiles(names, pages, extraAssets)
+  for (const [name, body] of files) fs.writeFileSync(path.join(outDir, name), body)
 }
