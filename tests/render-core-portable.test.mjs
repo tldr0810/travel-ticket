@@ -38,3 +38,8 @@ test('trip-core.mjs (the portable core) has no node: builtin imports', () => {
   const nodeBuiltins = noNodeImports('pipeline/trip-core.mjs')
   assert.deepEqual(nodeBuiltins, [], `trip-core.mjs must stay Worker-safe — found node: imports: ${nodeBuiltins.join(', ')}`)
 })
+
+test('worker/pipeline-steps.mjs has no node: builtin imports', () => {
+  const nodeBuiltins = noNodeImports('worker/pipeline-steps.mjs')
+  assert.deepEqual(nodeBuiltins, [], `worker/pipeline-steps.mjs must stay Worker-safe — found node: imports: ${nodeBuiltins.join(', ')}`)
+})

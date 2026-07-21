@@ -4,3 +4,4 @@ dist/
 data/posters/
 data/trips/
 .env
+.wrangler/

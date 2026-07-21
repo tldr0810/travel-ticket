@@ -6,6 +6,14 @@ compatibility_date = "2024-09-23"
 directory = "dist"
 binding = "ASSETS"
 
+# Lets worker/pipeline-workflow.ts `import cityThemePrompt from
+# '../pipeline/prompts/city-theme.txt'` at build time (no fs read at runtime —
+# customTheme.mjs takes promptTemplate as a plain string parameter).
+[[rules]]
+type = "Text"
+globs = ["**/*.txt"]
+fallthrough = true
+
 # KV-only storage (see docs/superpowers/specs/2026-07-21-public-cloud-deploy-design.md
 # 更正 2): R2 needs a credit card on file, KV doesn't. TRIPS_KV holds per-trip
 # progress status (`trip:<id>:status`); TRIPS_SITES holds the rendered site
