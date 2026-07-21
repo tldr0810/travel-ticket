@@ -51,14 +51,18 @@
 
 - [ ] `npx wrangler login`（2026-07-21 檢查過：**未登入**，舊 demo 的登入已失效）
       或給 Cloudflare API token（Workers + R2 + KV + Workflows 權限）
-- [ ] **（新）核准 consent URL**：已用 `mf auth ensure --scopes agents:edit,agents:read,a2a:edit,a2a:read`
-      產生一條 `https://app-staging.manyfold.ai/grant-permission?token=...` 網址並傳給你——
-      這個 agent 沒辦法自己核准，需要你點開網址核准，才能建立下面的 pipeline agent。
-      （網址有效期短，若過期跟這個 agent 說一聲再產生一次即可。）
-- [ ] **（新）建立 `AGENT_PIPELINE` agent**：上面核准後，跑
-      `mf agent create "travel-ticket-pipeline"` 拿到 `agt_...` id，
-      填進 `wrangler.itinerary.toml` 的 `AGENT_PIPELINE = "agt_..."`。
-- [ ] **（新）`MF_API_TOKEN` → 設成 Worker secret**：
+- [x] ~~核准 consent URL~~（2026-07-21 已核准 `agents:edit`/`agents:read`/`a2a:edit`/`a2a:read`）
+- [x] ~~建立 `AGENT_PIPELINE` agent~~（2026-07-21 已建立：
+      `agt_agpyj7n5wr4r3h3euvlbrqehpy`，已填進 `wrangler.itinerary.toml`）
+- [ ] **（新，卡住點）在新 agent 的 A2A 分頁手動授權**：`mf a2a status` 仍顯示
+      `no peer agents granted`；試打 token mint 端點回
+      `"no active A2A grant for this peer"`。`mf help a2a --agent` 明說這一步
+      要「to the target agent's A2A tab」手動授權——**這是 dashboard 操作，
+      agent 端 CLI/consent URL 都做不到**。麻煩你：開 Manyfold dashboard →
+      找 `travel-ticket-pipeline`（`agt_agpyj7n5wr4r3h3euvlbrqehpy`）這個 agent
+      → A2A 分頁 → 把它授權給這個 agent（`agt_agpyjshs4b7obacdsev6x4m7wm`）
+      當呼叫方。做完跟我說一聲，我會重跑 `mf a2a status` 確認。
+- [ ] **`MF_API_TOKEN` → 設成 Worker secret**：
       `wrangler secret put MF_API_TOKEN --config wrangler.itinerary.toml`
       （這個 agent 自己身份的 token，只有你自己能設定貼上，agent 不會也不能
       印出/經手這個值）

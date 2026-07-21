@@ -12,7 +12,10 @@ binding = "ASSETS"
 [vars]
 MF_API_URL = "https://api-staging.manyfold.ai/api"
 MF_AGENT_ID = "agt_agpyjshs4b7obacdsev6x4m7wm"
-# AGENT_PIPELINE = "agt_..."   # set once the shared pipeline agent is created (see HANDOVER-CLOUD.md)
+# Created 2026-07-21 (mf agent create "travel-ticket-pipeline" --account).
+# Still needs a manual A2A grant from Zack (see HANDOVER-CLOUD.md) before
+# MF_AGENT_ID can actually mint a peer token for it.
+AGENT_PIPELINE = "agt_agpyj7n5wr4r3h3euvlbrqehpy"
 
 # Set via: wrangler secret put MF_API_TOKEN --config wrangler.itinerary.toml
 # (this agent's own identity token, granted a2a:read + a2a:edit — Zack must
